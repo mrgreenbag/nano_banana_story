@@ -1,0 +1,161 @@
+{
+  "mode": "AUTO",
+  "title": "Luna in Mavrica Barv",
+  "age_band": "3-5",
+  "pages_count": 16,
+  "kdp": {
+    "trim_in": { "w": 8.5, "h": 8.5 },
+    "bleed_in": 0.125,
+    "print_dpi": 300
+  },
+  "dimensions": {
+    "pdf_w_in": 8.75,
+    "pdf_h_in": 8.75,
+    "img_w_px": 2625,
+    "img_h_px": 2625,
+    "aspect_ratio": "1:1"
+  },
+  "theme": "colors, discovery, joy",
+  "style_card": "Soft watercolor children's book illustration style with gentle brushstrokes and dreamy textures. Palette: pastel rainbow colors (#FFB3D9 pink, #B8E6FF sky blue, #FFF4B3 yellow, #C9FFB3 mint green, #E6CCFF lavender, #FFD4B3 peach) with soft white backgrounds and subtle cloud textures. Lighting: warm, diffused natural light as if on a sunny morning. Line weight: thin, delicate black outlines for definition but not harsh. Shading: minimal, using lighter/darker color variations only. Composition: centered subjects with plenty of breathing room, low camera angles (child's eye view), safe margins for text placement at top or bottom. Recurrent motifs: small sparkles, soft round shapes, gentle curves. DO NOT use: photorealism, sharp edges, dark shadows, cluttered backgrounds, logo marks, text overlays, adult themes. DO use: rounded friendly shapes, smiling faces, clear focal points, inviting warm atmosphere.",
+  "character_bible": [
+    {
+      "name": "Luna",
+      "species": "young girl",
+      "age": "4 years old",
+      "colors": {
+        "skin": "light peachy tone",
+        "hair": "short curly brown hair with small yellow hair clip",
+        "outfit": "soft yellow dress with white collar, white socks, red shoes"
+      },
+      "props": ["yellow butterfly net (sometimes)", "small basket"],
+      "notes": "Always smiling and curious. Big round eyes full of wonder. Small stature, toddler proportions. Expressive hands - often reaching or pointing. Never sad or scared, always joyful and engaged.",
+      "expressions": ["wide smile", "eyes wide with wonder", "giggling", "excited"],
+      "scale": "small child, about 1/3 of page height when standing"
+    }
+  ],
+  "pages": [
+    {
+      "index": 1,
+      "text": "To je Luna. Luna ljubi barve.",
+      "image_prompt": "",
+      "image_path": "",
+      "alt": ""
+    },
+    {
+      "index": 2,
+      "text": "Rdeča je Luna-ina najljubša barva.",
+      "image_prompt": "",
+      "image_path": "",
+      "alt": ""
+    },
+    {
+      "index": 3,
+      "text": "Luna vidi rumeno sonce.",
+      "image_prompt": "",
+      "image_path": "",
+      "alt": ""
+    },
+    {
+      "index": 4,
+      "text": "Luna najde oranžno rožo.",
+      "image_prompt": "",
+      "image_path": "",
+      "alt": ""
+    },
+    {
+      "index": 5,
+      "text": "Zelena trava je mehka.",
+      "image_prompt": "",
+      "image_path": "",
+      "alt": ""
+    },
+    {
+      "index": 6,
+      "text": "Luna gleda modro nebo.",
+      "image_prompt": "",
+      "image_path": "",
+      "alt": ""
+    },
+    {
+      "index": 7,
+      "text": "Vijolični metulj leti mimo.",
+      "image_prompt": "",
+      "image_path": "",
+      "alt": ""
+    },
+    {
+      "index": 8,
+      "text": "Rožnata roža diši lepo.",
+      "image_prompt": "",
+      "image_path": "",
+      "alt": ""
+    },
+    {
+      "index": 9,
+      "text": "Luna najde mavrico!",
+      "image_prompt": "",
+      "image_path": "",
+      "alt": ""
+    },
+    {
+      "index": 10,
+      "text": "Rdeča, oranžna, rumena.",
+      "image_prompt": "",
+      "image_path": "",
+      "alt": ""
+    },
+    {
+      "index": 11,
+      "text": "Zelena, modra, vijolična.",
+      "image_prompt": "",
+      "image_path": "",
+      "alt": ""
+    },
+    {
+      "index": 12,
+      "text": "Vse barve skupaj!",
+      "image_prompt": "",
+      "image_path": "",
+      "alt": ""
+    },
+    {
+      "index": 13,
+      "text": "Luna skoči v lužo.",
+      "image_prompt": "",
+      "image_path": "",
+      "alt": ""
+    },
+    {
+      "index": 14,
+      "text": "Luža je polna barv!",
+      "image_prompt": "",
+      "image_path": "",
+      "alt": ""
+    },
+    {
+      "index": 15,
+      "text": "Luna se nasmehne.",
+      "image_prompt": "",
+      "image_path": "",
+      "alt": ""
+    },
+    {
+      "index": 16,
+      "text": "Barve so povsod!",
+      "image_prompt": "",
+      "image_path": "",
+      "alt": ""
+    }
+  ],
+  "meta": {
+    "language": "Slovenian",
+    "created": "2025-10-02",
+    "log": [
+      {
+        "timestamp": "2025-10-02T00:00:00Z",
+        "action": "AUTO mode initialization",
+        "details": "Generated book for age 3-5: Luna in Mavrica Barv (Luna and the Rainbow of Colors)"
+      }
+    ]
+  }
+}
