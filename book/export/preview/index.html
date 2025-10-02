@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="sl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Luna in Mavrica Barv - Preview</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: #333;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    
+    header {
+      text-align: center;
+      color: white;
+      padding: 40px 20px;
+      margin-bottom: 40px;
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      border-radius: 20px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    }
+    
+    h1 {
+      font-size: 3rem;
+      margin-bottom: 10px;
+      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
+    }
+    
+    .subtitle {
+      font-size: 1.2rem;
+      opacity: 0.9;
+      margin-top: 10px;
+    }
+    
+    .book-info {
+      display: flex;
+      justify-content: center;
+      gap: 30px;
+      margin-top: 20px;
+      flex-wrap: wrap;
+    }
+    
+    .info-item {
+      background: rgba(255, 255, 255, 0.2);
+      padding: 10px 20px;
+      border-radius: 25px;
+      font-size: 0.9rem;
+    }
+    
+    .preview-notice {
+      background: rgba(255, 255, 255, 0.95);
+      padding: 20px;
+      border-radius: 15px;
+      text-align: center;
+      margin-bottom: 30px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+    }
+    
+    .preview-notice h2 {
+      color: #667eea;
+      margin-bottom: 10px;
+    }
+    
+    .pages-grid {
+      display: grid;
+      gap: 30px;
+      margin-bottom: 40px;
+    }
+    
+    .page-card {
+      background: white;
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+    
+    .page-card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 15px 50px rgba(0, 0, 0, 0.2);
+    }
+    
+    .page-image {
+      width: 100%;
+      height: auto;
+      display: block;
+      background: #f8f9fa;
+    }
+    
+    .page-content {
+      padding: 25px;
+    }
+    
+    .page-number {
+      display: inline-block;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 5px 15px;
+      border-radius: 20px;
+      font-size: 0.9rem;
+      font-weight: bold;
+      margin-bottom: 15px;
+    }
+    
+    .page-text {
+      font-size: 1.4rem;
+      line-height: 1.6;
+      color: #333;
+      margin-bottom: 15px;
+      font-weight: 500;
+    }
+    
+    .page-alt {
+      font-size: 0.95rem;
+      color: #666;
+      font-style: italic;
+      border-left: 3px solid #667eea;
+      padding-left: 15px;
+      margin-top: 15px;
+    }
+    
+    footer {
+      text-align: center;
+      color: white;
+      padding: 40px 20px;
+      margin-top: 40px;
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      border-radius: 20px;
+    }
+    
+    .specs {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin-top: 20px;
+      text-align: left;
+    }
+    
+    .spec-item {
+      background: rgba(255, 255, 255, 0.15);
+      padding: 15px;
+      border-radius: 10px;
+    }
+    
+    .spec-label {
+      font-weight: bold;
+      opacity: 0.8;
+      font-size: 0.85rem;
+      margin-bottom: 5px;
+    }
+    
+    .spec-value {
+      font-size: 1.1rem;
+    }
+    
+    @media (max-width: 768px) {
+      h1 {
+        font-size: 2rem;
+      }
+      
+      .page-text {
+        font-size: 1.2rem;
+      }
+      
+      .book-info {
+        gap: 10px;
+      }
+    }
+    
+    .loading {
+      opacity: 0;
+      animation: fadeIn 0.5s ease-in forwards;
+    }
+    
+    @keyframes fadeIn {
+      to {
+        opacity: 1;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>📚 Luna in Mavrica Barv</h1>
+      <p class="subtitle">Otroška slikanica za starost 3-5 let</p>
+      <div class="book-info">
+        <div class="info-item">📄 16 strani</div>
+        <div class="info-item">📐 8.5" × 8.5"</div>
+        <div class="info-item">🎨 colors, discovery, joy</div>
+      </div>
+    </header>
+    
+    <div class="preview-notice">
+      <h2>👀 Predogled prvih 5 strani</h2>
+      <p>Celotna knjiga vsebuje 16 čudovito ilustriranih strani.</p>
+    </div>
+    
+    <div class="pages-grid">
+      
+        <article class="page-card loading" style="animation-delay: 0s">
+          <img 
+            src="page-001.png" 
+            alt="Page 1: Luna standing in a garden full of colorful flowers and butterflies. She is smiling widely with her arms spread open in joy. The background has soft pastel flowers in various colors."
+            class="page-image"
+            loading="lazy"
+          >
+          <div class="page-content">
+            <span class="page-number">Stran 1</span>
+            <p class="page-text">To je Luna. Luna ljubi barve.</p>
+            <div class="page-alt">🎨 Page 1: Luna standing in a garden full of colorful flowers and butterflies. She is smiling widely with her arms spread open in joy. The background has soft pastel flowers in various colors.</div>
+          </div>
+        </article>
+      
+        <article class="page-card loading" style="animation-delay: 0.1s">
+          <img 
+            src="page-002.png" 
+            alt="Page 2: Luna holding a big red apple in both hands, looking at it with wonder. A few more red items around her - a red balloon floating nearby, red flowers."
+            class="page-image"
+            loading="lazy"
+          >
+          <div class="page-content">
+            <span class="page-number">Stran 2</span>
+            <p class="page-text">Rdeča je Luna-ina najljubša barva.</p>
+            <div class="page-alt">🎨 Page 2: Luna holding a big red apple in both hands, looking at it with wonder. A few more red items around her - a red balloon floating nearby, red flowers.</div>
+          </div>
+        </article>
+      
+        <article class="page-card loading" style="animation-delay: 0.2s">
+          <img 
+            src="page-003.png" 
+            alt="Page 3: Luna looking up at a bright yellow sun in a light blue sky. Sun has a friendly smiling face. Luna is shielding her eyes with one hand, smiling."
+            class="page-image"
+            loading="lazy"
+          >
+          <div class="page-content">
+            <span class="page-number">Stran 3</span>
+            <p class="page-text">Luna vidi rumeno sonce.</p>
+            <div class="page-alt">🎨 Page 3: Luna looking up at a bright yellow sun in a light blue sky. Sun has a friendly smiling face. Luna is shielding her eyes with one hand, smiling.</div>
+          </div>
+        </article>
+      
+        <article class="page-card loading" style="animation-delay: 0.30000000000000004s">
+          <img 
+            src="page-004.png" 
+            alt="Page 4: Luna kneeling down in grass, reaching to touch a large orange flower (like a marigold or zinnia). The flower is at her eye level."
+            class="page-image"
+            loading="lazy"
+          >
+          <div class="page-content">
+            <span class="page-number">Stran 4</span>
+            <p class="page-text">Luna najde oranžno rožo.</p>
+            <div class="page-alt">🎨 Page 4: Luna kneeling down in grass, reaching to touch a large orange flower (like a marigold or zinnia). The flower is at her eye level.</div>
+          </div>
+        </article>
+      
+        <article class="page-card loading" style="animation-delay: 0.4s">
+          <img 
+            src="page-005.png" 
+            alt="Page 5: Luna sitting cross-legged on soft green grass, running her hands through it. Grass is lush and vivid green. Small white daisies scattered around."
+            class="page-image"
+            loading="lazy"
+          >
+          <div class="page-content">
+            <span class="page-number">Stran 5</span>
+            <p class="page-text">Zelena trava je mehka.</p>
+            <div class="page-alt">🎨 Page 5: Luna sitting cross-legged on soft green grass, running her hands through it. Grass is lush and vivid green. Small white daisies scattered around.</div>
+          </div>
+        </article>
+      
+    </div>
+    
+    <footer>
+      <h3>📊 Tehnične specifikacije</h3>
+      <div class="specs">
+        <div class="spec-item">
+          <div class="spec-label">Trim velikost</div>
+          <div class="spec-value">8.5" × 8.5"</div>
+        </div>
+        <div class="spec-item">
+          <div class="spec-label">Bleed</div>
+          <div class="spec-value">0.125" na vseh straneh</div>
+        </div>
+        <div class="spec-item">
+          <div class="spec-label">DPI</div>
+          <div class="spec-value">300</div>
+        </div>
+        <div class="spec-item">
+          <div class="spec-label">Slikovna velikost</div>
+          <div class="spec-value">2625 × 2625 px</div>
+        </div>
+        <div class="spec-item">
+          <div class="spec-label">Starost</div>
+          <div class="spec-value">3-5 let</div>
+        </div>
+        <div class="spec-item">
+          <div class="spec-label">Jezik</div>
+          <div class="spec-value">Slovenian</div>
+        </div>
+      </div>
+      <p style="margin-top: 30px; opacity: 0.8;">
+        🤖 Avtomatsko generirano s Picture Book Production Agent<br>
+        ✨ Pripravljeno za Amazon KDP
+      </p>
+    </footer>
+  </div>
+</body>
+</html>

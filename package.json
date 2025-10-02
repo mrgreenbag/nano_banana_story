@@ -1,0 +1,25 @@
+{
+  "name": "picture-book-agent",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "KDP-ready children's picture book generator with AI illustrations",
+  "main": "generate_images.js",
+  "scripts": {
+    "render": "node generate_images.js",
+    "demo": "node generate_images_demo.js",
+    "pdf": "node export_pdf.js",
+    "preview": "node build_preview.js",
+    "cli": "node book_cli.js",
+    "manifest": "node book_cli.js /manifest",
+    "style": "node book_cli.js /style",
+    "cover": "node book_cli.js /cover"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "pdfkit": "^0.15.0",
+    "sharp": "^0.33.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
