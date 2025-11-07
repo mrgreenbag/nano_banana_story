@@ -342,11 +342,11 @@
     if(this.grounded && (this.state==='walk' || this.state==='run')){
       const speed=Math.abs(this.vel.x);
       this.stanceRatio = (this.state==='run') ? 0.36 : 0.62;
-      const baseCad = (this.state==='run') ? 2.6 : 1.6;
-      const cad = clamp(baseCad + 0.0045*speed, this.state==='run'?2.6:1.4, this.state==='run'?3.6:2.4);
+      const baseCad = (this.state==='run') ? 2.6 : 1.5;
+      const cadLow = (this.state==='run') ? 2.6 : 1.4;
+      const cadHigh = (this.state==='run') ? 3.8 : 2.5;
+      const cad = clamp(baseCad + 0.0045*speed, cadLow, cadHigh);
       this.gaitCadence = cad;
-
-      const stepLen = clamp(18 + 0.32*speed, 26, (this.state==='run'? 86 : 68));
 
       this.gaitLeft = (this.gaitLeft + this.gaitCadence*dt) % 1;
       const leftPhase=this.gaitLeft, rightPhase=(this.gaitLeft+0.5)%1;
@@ -354,11 +354,13 @@
       const rightInStance = rightPhase < this.stanceRatio;
       const swingDur = Math.max(0.06, (1-this.stanceRatio)/this.gaitCadence);
 
+      const strideN = clamp(speed/(this.state==='run'?420:220), 0, 1);
+      const front = this.state==='run' ? lerp(18, 38, strideN) : lerp(12, 22, strideN);
+      const trailing = this.state==='run' ? lerp(8, 18, strideN) : lerp(6, 12, strideN);
+      const lift = this.state==='run' ? lerp(6, 20, strideN) : lerp(3, 10, strideN);
+
       const minX=this.pos.x-(dim.thigh+dim.shin-10);
       const maxX=this.pos.x+(dim.thigh+dim.shin-10);
-
-      const front = stepLen*0.55;
-      const trailing = stepLen*0.35;
 
       if(this.prevLeftInStance && !leftInStance && this.footL.state==='stance'){
         let tx=this.pos.x + dir*front; tx=clamp(tx,minX,maxX);
@@ -372,30 +374,50 @@
       }
 
       for (const f of [this.footL, this.footR]) {
-        if (f.state==='stance') { f.pos.x=f.anchor.x; f.pos.y=ground; }
-        else if (f.state==='swing' && f.target) {
+        if (f.state==='stance') {
+          f.pos.x=f.anchor.x; f.pos.y=ground;
+        } else if (f.state==='swing' && f.target) {
           f.progress = Math.min(1, (f.progress||0) + dt/swingDur);
           const t=easeInOut(f.progress), tHeight=Math.pow(t,0.9);
-          const lift=(this.state==='run')?22:8;
+          const liftAmt = lerp(4, lift, tHeight);
           f.pos.x=lerp(f.anchor.x,f.target.x,t);
-          f.pos.y=ground - Math.sin(Math.PI*tHeight)*lift;
-          if(f.progress>=1){ f.state='stance'; f.anchor.x=f.target.x; f.pos.x=f.target.x; f.pos.y=ground; f.target=null; }
+          f.pos.y=ground - Math.sin(Math.PI*tHeight)*liftAmt;
+          if(f.progress>=1){
+            f.state='stance';
+            f.anchor.x=f.target.x;
+            f.pos.x=f.target.x; f.pos.y=ground;
+            f.target=null;
+          }
         }
       }
 
       if(leftInStance){
         const desiredAnchor = this.pos.x - dir*trailing;
-        this.footL.anchor.x = lerp(this.footL.anchor.x, clamp(desiredAnchor, minX, maxX), Math.min(1, dt*5));
+        this.footL.anchor.x = lerp(this.footL.anchor.x, clamp(desiredAnchor, minX, maxX), Math.min(1, dt*6));
       }
       if(rightInStance){
         const desiredAnchor = this.pos.x + dir*trailing;
-        this.footR.anchor.x = lerp(this.footR.anchor.x, clamp(desiredAnchor, minX, maxX), Math.min(1, dt*5));
+        this.footR.anchor.x = lerp(this.footR.anchor.x, clamp(desiredAnchor, minX, maxX), Math.min(1, dt*6));
       }
 
-      if(leftInStance){ const s=leftPhase/this.stanceRatio; this.footL.ang += (baseAngle + roll.heelToFlat(Math.min(1,s)) - this.footL.ang)*Math.min(1,dt*12); }
-      else{ const s=(leftPhase-this.stanceRatio)/(1-this.stanceRatio); this.footL.ang += (baseAngle + roll.swingClear(s) - this.footL.ang)*Math.min(1,dt*10); }
-      if(rightInStance){ const s=rightPhase/this.stanceRatio; this.footR.ang += (baseAngle + roll.heelToFlat(Math.min(1,s)) - this.footR.ang)*Math.min(1,dt*12); }
-      else{ const s=(rightPhase-this.stanceRatio)/(1-this.stanceRatio); this.footR.ang += (baseAngle + roll.swingClear(s) - this.footR.ang)*Math.min(1,dt*10); }
+      if(leftInStance){
+        const s=leftPhase/this.stanceRatio;
+        this.footL.ang += (baseAngle + roll.heelToFlat(Math.min(1,s)) - this.footL.ang)*Math.min(1,dt*12);
+      } else {
+        const swingFrac = clamp((leftPhase - this.stanceRatio)/(1-this.stanceRatio),0,1);
+        const swingAngAmp = (this.state==='run'?0.26:0.16);
+        const targetAng = baseAngle - swingAngAmp*Math.sin(Math.PI*swingFrac);
+        this.footL.ang += (targetAng - this.footL.ang)*Math.min(1,dt*10);
+      }
+      if(rightInStance){
+        const s=rightPhase/this.stanceRatio;
+        this.footR.ang += (baseAngle + roll.heelToFlat(Math.min(1,s)) - this.footR.ang)*Math.min(1,dt*12);
+      } else {
+        const swingFrac = clamp((rightPhase - this.stanceRatio)/(1-this.stanceRatio),0,1);
+        const swingAngAmp = (this.state==='run'?0.26:0.16);
+        const targetAng = baseAngle - swingAngAmp*Math.sin(Math.PI*swingFrac);
+        this.footR.ang += (targetAng - this.footR.ang)*Math.min(1,dt*10);
+      }
 
       this.prevLeftInStance=leftInStance; this.prevRightInStance=rightInStance;
       return;
@@ -608,12 +630,12 @@
 
     // ---- Arms
     const baseDown=Math.PI*0.5;
-    let lUpper, rUpper, lElbow, rElbow, lHandA, rHandA;
+    let lUpper, rUpper, lElbow, rElbow, lHandOff, rHandOff;
 
     if(this.state==='jumpAnticipation'){
       const total=this.wasRunningJump?0.10:0.16; const t=(total - this.stateTimer)/total;
       const back=lerp(0, -1.0, easeInOut(t));
-      lUpper=baseDown+back; rUpper=baseDown+back; lElbow=0.25; rElbow=0.25; lHandA=-0.1; rHandA=-0.1;
+      lUpper=baseDown+back; rUpper=baseDown+back; lElbow=0.25; rElbow=0.25; lHandOff=0.32; rHandOff=0.32;
     }
     else if(this.state==='jump'){
       const ascend = this.vel.y < -40 ? 1 : 0;
@@ -630,27 +652,28 @@
 
       lElbow = ascend ? 0.32 : 0.48;
       rElbow = lElbow;
-      lHandA = ascend ? -0.05 : 0.06;
-      rHandA = lHandA;
+      lHandOff = ascend ? 0.18 : 0.28;
+      rHandOff = lHandOff;
     }
     else if(this.state==='fall'){
-      const reach = easeOutSine(clamp(this.fallTimer/0.22,0,1));
-      const arc = Math.PI*0.9 + reach*0.22;
-      lUpper = baseDown - arc;
-      rUpper = baseDown + arc;
-      const elbowBend = 0.42 - reach*0.22;
+      const reach = easeOutSine(clamp(this.fallTimer/0.25,0,1));
+      const targetLA = -Math.PI/2 - 0.3;
+      const targetRA = -Math.PI/2 + 0.3;
+      lUpper = lerp(baseDown, targetLA, reach);
+      rUpper = lerp(baseDown, targetRA, reach);
+      const elbowBend = lerp(0.48, 0.22, reach);
       lElbow = elbowBend;
       rElbow = elbowBend;
-      const handCurl = -0.18 + reach*0.45;
-      lHandA = handCurl;
-      rHandA = handCurl;
+      const handCurl = lerp(0.26, -0.12, reach);
+      lHandOff = handCurl;
+      rHandOff = handCurl;
     }
     else if(this.state==='land'){
-      lUpper=baseDown-0.35; rUpper=baseDown-0.35; lElbow=0.55; rElbow=0.55; lHandA=-0.05; rHandA=-0.05;
+      lUpper=baseDown-0.32; rUpper=baseDown-0.32; lElbow=0.55; rElbow=0.55; lHandOff=0.22; rHandOff=0.22;
     }
     else{
       const armAmp = (this.state==='run'? 1.05 : this.state==='walk'? 0.58 : 0.16);
-      const handSwing = (this.state==='run'? 0.38 : this.state==='walk'? 0.24 : 0.08);
+      const handSwing = (this.state==='run'? 0.32 : this.state==='walk'? 0.22 : 0.06);
       const lS = Math.sin((leftPhase)*TAU), rS = Math.sin((rightPhase)*TAU);
       const jitter = 0.06 * n1(this.t*3.1);
       lUpper = baseDown + (-armAmp)*rS + jitter;
@@ -659,18 +682,18 @@
       const leftBlend  = (1+Math.sin((leftPhase )*TAU))/2;
       lElbow = lerp(0.64, 0.36, rightBlend);
       rElbow = lerp(0.64, 0.36, leftBlend);
-      const handBase = -0.28;
-      lHandA = handBase + handSwing*rightBlend;
-      rHandA = handBase + handSwing*leftBlend;
+      const handBase = 0.35;
+      lHandOff = handBase + handSwing*rightBlend;
+      rHandOff = handBase + handSwing*leftBlend;
     }
 
     b.lArm.world.p=this.shoulderL; b.lArm.world.a=lUpper;
     b.lFore.world.p=b.lArm.end();   b.lFore.world.a=b.lArm.world.a + lElbow;
-    b.lHand.world.p=b.lFore.end();  b.lHand.world.a=lHandA;
+    b.lHand.world.p=b.lFore.end();  b.lHand.world.a=b.lFore.world.a + lHandOff;
 
     b.rArm.world.p=this.shoulderR; b.rArm.world.a=rUpper;
     b.rFore.world.p=b.rArm.end();   b.rFore.world.a=b.rArm.world.a + rElbow;
-    b.rHand.world.p=b.rFore.end();  b.rHand.world.a=rHandA;
+    b.rHand.world.p=b.rFore.end();  b.rHand.world.a=b.rFore.world.a + rHandOff;
   };
 
   Character.prototype.draw=function(){
