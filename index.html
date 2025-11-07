@@ -3,24 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>2D Skeletal Character – advanced kinematics</title>
+  <title>2D Skeletal Character – manual rig</title>
   <style>
     :root{ --bg:#0b0f15; --fg:#cfe7ff; --accent:#7dd3fc; --accent2:#a78bfa; }
     html,body{height:100%}
     body{margin:0;background:radial-gradient(1200px 600px at 70% 10%, #0e1622 0%, #0b0f15 60%, #080b10 100%); color:var(--fg); font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; overflow:hidden}
-    #ui{position:fixed; inset:auto 12px 12px 12px; display:flex; gap:12px; align-items:flex-start; flex-wrap:wrap}
-    #panel{backdrop-filter: blur(8px); background:rgba(20,27,38,.58); border:1px solid rgba(255,255,255,.08); padding:10px 12px; border-radius:14px; box-shadow:0 10px 30px rgba(0,0,0,.35); max-width:520px}
-    #panel h1{font-size:14px;margin:0 0 6px 0; color:#e8f3ff}
-    #panel .row{display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:6px}
-    label{display:flex; align-items:center; gap:6px; opacity:.95}
-    input[type="range"]{width:120px}
-    select,button{background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.14); color:var(--fg); border-radius:8px; padding:6px 10px}
     .kbd{display:inline-flex; align-items:center; justify-content:center; min-width:22px; padding:2px 6px; border-radius:6px; border:1px solid rgba(255,255,255,.12); background:rgba(255,255,255,.06); font-weight:600}
     #hint{position:fixed; top:12px; right:12px; padding:8px 12px; border-radius:12px; border:1px solid rgba(255,255,255,.08); background:rgba(20,27,38,.58)}
     #tests{position:fixed; top:12px; left:12px; padding:6px 10px; border-radius:10px; border:1px solid rgba(255,255,255,.08); background:rgba(20,27,38,.58); font-size:12px}
     #err{position:fixed; left:50%; transform:translateX(-50%); bottom:12px; max-width:80vw; padding:8px 12px; border-radius:10px; border:1px solid rgba(255,80,80,.35); background:rgba(255,80,80,.1); color:#fecaca; font-size:12px; display:none}
     canvas{display:block; width:100vw; height:100vh}
-    .subtle{opacity:.7}
   </style>
 </head>
 <body>
@@ -29,53 +21,10 @@
   <div id="hint">
     Tipke: <span class="kbd">A</span>/<span class="kbd">D</span> – hoja/tek ·
     <span class="kbd">Shift</span> – tek · <span class="kbd">W</span>/<span class="kbd">Space</span> – skok ·
-    <span class="kbd">S</span> – počep / pospešen padec · <span class="kbd">G</span> – mreža · <span class="kbd">R</span> – recenter
+    <span class="kbd">S</span> – počep / hitrejši padec · <span class="kbd">G</span> – mreža · <span class="kbd">B</span>/<span class="kbd">T</span> – kosti/tarče · <span class="kbd">R</span> – recenter
   </div>
   <div id="tests">Self-tests: <span id="testsStatus">running…</span></div>
   <div id="err"></div>
-
-  <div id="ui">
-    <div id="panel">
-      <h1>Rig debug + Modes</h1>
-      <div class="row">
-        <label>Mode
-          <select id="mode">
-            <option value="manual">manual</option>
-            <option value="sim">sim (auto pace)</option>
-            <option value="auto">auto-track (kamera)</option>
-          </select>
-        </label>
-        <label><input id="showBones" type="checkbox" checked> prikaži kosti</label>
-        <label><input id="showTargets" type="checkbox" checked> prikaži stopalne tarče</label>
-        <label><input id="showCoM" type="checkbox"> center mase</label>
-        <label>višina lika <input id="heightScale" type="range" min="0.8" max="1.3" step="0.01" value="1.0"></label>
-      </div>
-
-      <div id="simControls" class="row" style="display:none">
-        <label>hitrost <input id="simSpeed" type="range" min="0" max="500" step="5" value="220"><span id="simSpeedVal" class="subtle">220</span>px/s</label>
-        <label>cadence <input id="simCadence" type="range" min="0.8" max="4" step="0.01" value="1.8"><span id="simCadenceVal" class="subtle">1.8</span>step/s</label>
-        <label>skok na <input id="simJumpPeriod" type="range" min="0" max="8" step="0.1" value="0"><span id="simJumpVal" class="subtle">izklopljeno</span></label>
-        <label> smer
-          <select id="simDir">
-            <option value="1">→</option>
-            <option value="-1">←</option>
-          </select>
-        </label>
-      </div>
-      <div id="simControls2" class="row" style="display:none">
-        <button id="calibrateBtn">Kalibriraj FPS</button>
-        <span id="calStatus" class="subtle">ni v teku</span>
-        <button id="saveProfile">Shrani profil</button>
-        <button id="resetProfile">Reset profil</button>
-      </div>
-
-      <div id="autoControls" class="row" style="display:none">
-        <button id="autoStart">Start kamera</button>
-        <button id="autoStop">Stop kamera</button>
-        <span id="autoStatus" class="subtle">kamera: stop</span>
-      </div>
-    </div>
-  </div>
 
 <script>
 (() => {
@@ -93,68 +42,20 @@
 
   // ================= Input =================
   const keys = new Set();
-  const WANT_CODES = ['KeyW','Space','KeyA','KeyS','KeyD','ShiftLeft','ShiftRight','ArrowLeft','ArrowRight','ArrowDown','KeyG','KeyR'];
-  window.addEventListener('keydown', e => { const c=e.code; if(WANT_CODES.includes(c)) e.preventDefault(); keys.add(c); }, {passive:false});
+  let showBones = true;
+  let showTargets = true;
+  const WANT_CODES = ['KeyW','Space','KeyA','KeyS','KeyD','ShiftLeft','ShiftRight','ArrowLeft','ArrowRight','ArrowDown','KeyG','KeyR','KeyB','KeyT'];
+  window.addEventListener('keydown', e => {
+    const c=e.code;
+    if(WANT_CODES.includes(c)) e.preventDefault();
+    if(c==='KeyB') showBones=!showBones;
+    else if(c==='KeyT') showTargets=!showTargets;
+    else keys.add(c);
+  }, {passive:false});
   window.addEventListener('keyup',   e => keys.delete(e.code), {passive:false});
 
-  // ================= UI / Params =================
+  // ================= Params =================
   const GROUND_Y = () => H - 140;
-
-  const params = {
-    showBones: document.getElementById('showBones'),
-    showTargets: document.getElementById('showTargets'),
-    showCoM: document.getElementById('showCoM'),
-    heightScale: document.getElementById('heightScale'),
-    modeSel: document.getElementById('mode'),
-    // sim
-    simSpeed: document.getElementById('simSpeed'),
-    simCadence: document.getElementById('simCadence'),
-    simJumpPeriod: document.getElementById('simJumpPeriod'),
-    simDir: document.getElementById('simDir'),
-    simSpeedVal: document.getElementById('simSpeedVal'),
-    simCadenceVal: document.getElementById('simCadenceVal'),
-    simJumpVal: document.getElementById('simJumpVal'),
-    calibrateBtn: document.getElementById('calibrateBtn'),
-    calStatus: document.getElementById('calStatus'),
-    saveProfile: document.getElementById('saveProfile'),
-    resetProfile: document.getElementById('resetProfile'),
-    // auto
-    autoStart: document.getElementById('autoStart'),
-    autoStop: document.getElementById('autoStop'),
-    autoStatus: document.getElementById('autoStatus'),
-    simControls: document.getElementById('simControls'),
-    simControls2: document.getElementById('simControls2'),
-    autoControls: document.getElementById('autoControls'),
-  };
-
-  // Profile (persistable)
-  const LS_KEY='skelet_anim_profile_v7_airarms_fallstate';
-  const defaultProfile = {
-    mode: 'manual',
-    speed: 220,
-    cadence: 1.8,
-    jumpPeriod: 0,
-    dir: 1,
-    fpsComp: 1
-  };
-  let profile = {...defaultProfile, ...JSON.parse(localStorage.getItem(LS_KEY) || '{}')};
-
-  // UI init
-  params.modeSel.value = profile.mode;
-  params.simSpeed.value = profile.speed; params.simSpeedVal.textContent=profile.speed;
-  params.simCadence.value=profile.cadence; params.simCadenceVal.textContent=profile.cadence;
-  params.simJumpPeriod.value=profile.jumpPeriod; params.simJumpVal.textContent=profile.jumpPeriod>0? (profile.jumpPeriod+'s') : 'izklopljeno';
-  params.simDir.value=String(profile.dir);
-
-  const syncVisibility=()=>{
-    const m=params.modeSel.value;
-    params.simControls.style.display = m==='sim'?'flex':'none';
-    params.simControls2.style.display= m==='sim'?'flex':'none';
-    params.autoControls.style.display= m==='auto'?'flex':'none';
-  };
-  syncVisibility();
-
-  const saveProfile=()=> localStorage.setItem(LS_KEY, JSON.stringify(profile));
 
   // ================= Utils =================
   const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
@@ -244,7 +145,7 @@
     this.wasRunningJump=false;
   }
 
-  Character.prototype.dim=function(){ const s=parseFloat(params.heightScale.value); const r={}; for(const k in this.base) r[k]=this.base[k]*s; return r; };
+  Character.prototype.dim=function(){ return {...this.base}; };
 
   Character.prototype.updateState=function(dt){
     if(this.state==='jumpAnticipation' || this.state==='land') return;
@@ -255,8 +156,7 @@
       const descending = this.vel.y > 140 || (this.jumpApex && this.vel.y > 20);
       this.state = descending ? 'fall' : 'jump';
     } else {
-      const inSim = params.modeSel.value==='sim';
-      const crouching = !inSim && (keys.has('KeyS') || keys.has('ArrowDown'));
+      const crouching = (keys.has('KeyS') || keys.has('ArrowDown'));
       if(crouching){ this.state='crouch'; this.fallTimer=0; return; }
 
       const speed=Math.abs(this.vel.x);
@@ -274,85 +174,52 @@
   };
 
   Character.prototype.control=function(dt){
-    const mode=params.modeSel.value;
+    const accelWalk=2200, accelRun=3800, maxWalk=180, maxRun=420, friction=8;
+    const left  = keys.has('KeyA') || keys.has('ArrowLeft');
+    const right = keys.has('KeyD') || keys.has('ArrowRight');
+    const wantsRun = keys.has('ShiftLeft') || keys.has('ShiftRight');
+    const crouching = (keys.has('KeyS') || keys.has('ArrowDown')) && this.grounded;
 
-    if(mode==='sim'){
-      const target = profile.speed * profile.dir;
-      this.vel.x += (target - this.vel.x) * Math.min(1, dt*8);
-      if(Math.abs(this.vel.x)>1) this.facing = this.vel.x>0 ? 1 : -1;
+    if(left && !right) this.facing=-1; else if(right && !left) this.facing=1;
+    const horiz=(left?-1:0)+(right?1:0);
 
-      if(profile.jumpPeriod>0 && this.grounded && this.state!=='jumpAnticipation'){
-        simJumpClock += dt * profile.fpsComp;
-        if(simJumpClock >= profile.jumpPeriod){
-          this.state='jumpAnticipation';
-          this.stateTimer = Math.abs(this.vel.x)>180? 0.10 : 0.16;
-          this.wasRunningJump = Math.abs(this.vel.x)>220;
-          simJumpClock = 0;
-        }
-      }
-      return;
+    const maxSpd=crouching? maxWalk*0.35 : (wantsRun? maxRun : maxWalk);
+    const accel =crouching? accelWalk*0.25 : (wantsRun? accelRun : accelWalk);
+
+    const desired=horiz*maxSpd;
+    const delta=desired-this.vel.x;
+    const airScale=this.grounded?1:0.42;
+    this.vel.x += clamp(delta*10, -accel, accel)*dt*airScale;
+
+    if(horiz===0 && this.grounded){ this.vel.x*=Math.exp(-friction*dt); if(Math.abs(this.vel.x)<1) this.vel.x=0; }
+
+    if(!this.grounded){
+      const sideDamp = Math.exp(-(wantsRun?1.6:2.6)*dt);
+      if(horiz===0) this.vel.x*=sideDamp;
+      if(keys.has('KeyS') || keys.has('ArrowDown')) this.vel.y += 900*dt;
     }
 
-    if(mode==='manual'){
-      const accelWalk=2200, accelRun=3800, maxWalk=180, maxRun=420, friction=8;
-      const left  = keys.has('KeyA') || keys.has('ArrowLeft');
-      const right = keys.has('KeyD') || keys.has('ArrowRight');
-      const wantsRun = keys.has('ShiftLeft') || keys.has('ShiftRight');
-      const crouching = (keys.has('KeyS') || keys.has('ArrowDown')) && this.grounded;
-
-      if(left && !right) this.facing=-1; else if(right && !left) this.facing=1;
-      const horiz=(left?-1:0)+(right?1:0);
-
-      const maxSpd=crouching? maxWalk*0.35 : (wantsRun? maxRun : maxWalk);
-      const accel =crouching? accelWalk*0.25 : (wantsRun? accelRun : accelWalk);
-
-      const desired=horiz*maxSpd;
-      const delta=desired-this.vel.x;
-      const airScale=this.grounded?1:0.42;
-      this.vel.x += clamp(delta*10, -accel, accel)*dt*airScale;
-
-      if(horiz===0 && this.grounded){ this.vel.x*=Math.exp(-friction*dt); if(Math.abs(this.vel.x)<1) this.vel.x=0; }
-
-      if(!this.grounded){
-        const sideDamp = Math.exp(-(wantsRun?1.6:2.6)*dt);
-        if(horiz===0) this.vel.x*=sideDamp;
-        if(keys.has('KeyS') || keys.has('ArrowDown')) this.vel.y += 900*dt;
-      }
-
-      if((keys.has('KeyW') || keys.has('Space')) && this.grounded && this.state!=='jumpAnticipation' && !crouching){
-        const running=Math.abs(this.vel.x)>maxWalk*0.8;
-        this.state='jumpAnticipation';
-        this.stateTimer= running? 0.10 : 0.16;
-        this.wasRunningJump=running;
-      }
-
-      if(keys.has('KeyR')){
-        this.pos.x = W*0.5;
-        const dim = this.dim();
-        this.pos.y = GROUND_Y() - dim.pelvisToGround;
-        this.vel.x = 0; this.vel.y = 0;
-        const gy=GROUND_Y();
-        const off=this.neutralFootOffset;
-        this.footL.anchor=V(this.pos.x-off, gy);
-        this.footR.anchor=V(this.pos.x+off, gy);
-        this.footL.pos={...this.footL.anchor}; this.footR.pos={...this.footR.anchor};
-        this.grounded=true;
-        this.state='idle';
-        this.land.active=false;
-        this.fallTimer=0;
-      }
-      return;
+    if((keys.has('KeyW') || keys.has('Space')) && this.grounded && this.state!=='jumpAnticipation' && !crouching){
+      const running=Math.abs(this.vel.x)>maxWalk*0.8;
+      this.state='jumpAnticipation';
+      this.stateTimer= running? 0.10 : 0.16;
+      this.wasRunningJump=running;
     }
 
-    if(mode==='auto'){
-      if(autoTracker.bbox){
-        const cx = autoTracker.bbox.cx;
-        const desired = (cx - this.pos.x) * 4;
-        this.vel.x += (desired - this.vel.x) * Math.min(1, dt*6);
-        this.facing = this.vel.x>0 ? 1 : -1;
-      } else {
-        this.vel.x *= Math.exp(-8*dt);
-      }
+    if(keys.has('KeyR')){
+      this.pos.x = W*0.5;
+      const dim = this.dim();
+      this.pos.y = GROUND_Y() - dim.pelvisToGround;
+      this.vel.x = 0; this.vel.y = 0;
+      const gy=GROUND_Y();
+      const off=this.neutralFootOffset;
+      this.footL.anchor=V(this.pos.x-off, gy);
+      this.footR.anchor=V(this.pos.x+off, gy);
+      this.footL.pos={...this.footL.anchor}; this.footR.pos={...this.footR.anchor};
+      this.grounded=true;
+      this.state='idle';
+      this.land.active=false;
+      this.fallTimer=0;
     }
   };
 
@@ -374,19 +241,7 @@
 
   Character.prototype.stepFeet=function(dt){
     const dim=this.dim(); const ground=GROUND_Y(); const dir=(this.vel.x!==0? Math.sign(this.vel.x): this.facing);
-    const mode=params.modeSel.value;
     const baseAngle = (this.facing>=0)?0:Math.PI;
-
-    if(mode==='auto'){
-      if(autoTracker.bbox){
-        const b=autoTracker.bbox, footY=ground, spread=Math.max(12, Math.min(48, b.w*0.35));
-        for(const f of [this.footL,this.footR]){ f.state='stance'; f.progress=0; f.target=null; }
-        this.footL.pos=V(b.cx-spread,footY); this.footR.pos=V(b.cx+spread,footY);
-        this.footL.anchor=V(this.footL.pos.x,footY); this.footR.anchor=V(this.footR.pos.x,footY);
-        this.footL.ang=this.footR.ang=baseAngle;
-      }
-      return;
-    }
 
     if(this.state==='crouch' || this.state==='jumpAnticipation'){
       const off=this.neutralFootOffset;
@@ -398,16 +253,16 @@
 
     if(!this.grounded && (this.state==='jump' || this.state==='fall')){
       const descending = (this.state==='fall') || (this.jumpApex && this.vel.y>0);
-      const off = this.neutralFootOffset * (descending ? 0.95 : 0.85);
-      const leadBoost = this.wasRunningJump ? (descending ? 16 : 8) : (descending ? 6 : 2);
+      const off = this.neutralFootOffset * (descending ? 1.02 : 0.92);
+      const leadBoost = this.wasRunningJump ? (descending ? 18 : 10) : (descending ? 8 : 3);
 
       const t = this.t;
-      const jx = (descending?4:8) * n1(t*1.2);
-      const jy = (descending?2:4) * n2(t*1.1);
+      const jx = (descending?3:6) * n1(t*1.2);
+      const jy = (descending?1.5:3.5) * n2(t*1.1);
 
       const pelvisToFoot = dim.pelvisToGround;
-      const targetBaseY = this.pos.y + pelvisToFoot + (descending ? 10 : 4);
-      const yClamp = descending ? (ground - 6) : (ground - 18);
+      const targetBaseY = this.pos.y + pelvisToFoot + (descending ? 6 : 4);
+      const yClamp = descending ? (ground - 2) : (ground - 18);
       const yBase = Math.min(yClamp, targetBaseY);
 
       const landingFront = descending ? leadBoost : 0;
@@ -419,11 +274,11 @@
 
       const targetL = V(
         this.pos.x - off + adjustL + jx*0.35,
-        descending ? ground - 4 : yBase + jy
+        descending ? ground - 1 : yBase + jy
       );
       const targetR = V(
         this.pos.x + off + adjustR - jx*0.35,
-        descending ? ground - 4 : yBase - jy
+        descending ? ground - 1 : yBase - jy
       );
 
       const k = Math.min(1, dt*(descending?18:12));
@@ -434,8 +289,8 @@
 
       const rollPrep = descending ? clamp((this.vel.y+160)/420,0,1) : 0;
       const prepAng = roll.flatToToe(rollPrep);
-      this.footL.ang += (baseAngle + prepAng - this.footL.ang)*Math.min(1,dt*10);
-      this.footR.ang += (baseAngle + prepAng - this.footR.ang)*Math.min(1,dt*10);
+      this.footL.ang += (baseAngle + prepAng - this.footL.ang)*Math.min(1,dt*12);
+      this.footR.ang += (baseAngle + prepAng - this.footR.ang)*Math.min(1,dt*12);
 
       this.footL.state='swing'; this.footR.state='swing';
       return;
@@ -506,10 +361,12 @@
       if(this.prevLeftInStance && !leftInStance && this.footL.state==='stance'){
         let tx=this.pos.x + dir*front; tx=clamp(tx,minX,maxX);
         this.footL.state='swing'; this.footL.progress=0; this.footL.target={x:tx,y:ground};
+        if(this.state==='walk'){ this.footR.state='stance'; this.footR.pos.y=ground; }
       }
       if(this.prevRightInStance && !rightInStance && this.footR.state==='stance'){
         let tx=this.pos.x + dir*front; tx=clamp(tx,minX,maxX);
         this.footR.state='swing'; this.footR.progress=0; this.footR.target={x:tx,y:ground};
+        if(this.state==='walk'){ this.footL.state='stance'; this.footL.pos.y=ground; }
       }
 
       for (const f of [this.footL, this.footR]) {
@@ -517,7 +374,7 @@
         else if (f.state==='swing' && f.target) {
           f.progress = Math.min(1, (f.progress||0) + dt/swingDur);
           const t=easeInOut(f.progress), tHeight=Math.pow(t,0.9);
-          const lift=(this.state==='run')?30:16;
+          const lift=(this.state==='run')?24:9;
           f.pos.x=lerp(f.anchor.x,f.target.x,t);
           f.pos.y=ground - Math.sin(Math.PI*tHeight)*lift;
           if(f.progress>=1){ f.state='stance'; f.anchor.x=f.target.x; f.pos.x=f.target.x; f.pos.y=ground; f.target=null; }
@@ -551,7 +408,6 @@
     const dim=this.dim();
     const b=this.bones; // referenca
 
-    const mode=params.modeSel.value;
     this.stateTimer=Math.max(0, this.stateTimer - dt);
 
     if(this.state==='jumpAnticipation' && this.stateTimer<=0){
@@ -621,18 +477,13 @@
     const desiredPelvis = dim.pelvisToGround * poseHeightFactor;
 
     this.prevVelY = this.vel.y;
-    if(mode!=='auto'){
-      this.vel.y += 1400*dt;
-      this.pos.x += this.vel.x*dt;
-      this.pos.y += this.vel.y*dt;
+    this.vel.y += 1400*dt;
+    this.pos.x += this.vel.x*dt;
+    this.pos.y += this.vel.y*dt;
 
-      const minY = ground - desiredPelvis;
-      if (this.pos.y >= minY) { this.pos.y = minY; if (this.vel.y > 0) this.vel.y = 0; this.grounded = true; }
-      else { this.grounded = false; }
-    } else {
-      this.grounded=true; this.vel.y=0; this.pos.y = ground - desiredPelvis;
-      if(autoTracker.bbox){ const cx=autoTracker.bbox.cx; this.pos.x = lerp(this.pos.x, cx, 0.25); }
-    }
+    const minY = ground - desiredPelvis;
+    if (this.pos.y >= minY) { this.pos.y = minY; if (this.vel.y > 0) this.vel.y = 0; this.grounded = true; }
+    else { this.grounded = false; }
 
     // keep in view horizontally
     this.pos.x = clamp(this.pos.x, 40, W-40);
@@ -643,9 +494,9 @@
 
     // ---- Gait clock
     const speedTerm = Math.abs(this.vel.x)*0.02;
-    const cadence = (params.modeSel.value==='sim' ? profile.cadence : (this.state==='run'?3 : this.state==='walk'?2 : 0.5));
-    this.gaitClock += (speedTerm + cadence*0.16) * dt * profile.fpsComp;
-    const bob = this.grounded ? Math.sin(this.gaitClock*TAU) * (this.state==='run'?4 : this.state==='walk'?2 : 0.5) : (this.state==='fall'? -2 : 0);
+    const cadence = (this.state==='run'?3 : this.state==='walk'?1.9 : 0.5);
+    this.gaitClock += (speedTerm + cadence*0.16) * dt;
+    const bob = this.grounded ? Math.sin(this.gaitClock*TAU) * (this.state==='run'?4 : this.state==='walk'?1.6 : 0.4) : (this.state==='fall'? -2 : 0);
 
     // ---- Pelvis
     b.pelvis.world.p = V(this.pos.x, this.pos.y + bob);
@@ -694,16 +545,28 @@
     if(this.state==='land') kneeMinStance = 0.18;
     if(this.state==='fall'){ kneeMinSwing = 0.32; kneeMinStance = 0.24; }
 
+    let landShakeL=0, landShakeR=0;
+    if(this.state==='land'){
+      const damp = Math.exp(-this.land.t*16);
+      const wobble = Math.sin(this.land.t*70) * 0.18 * damp;
+      if(this.land.lead==='L'){ landShakeL = wobble; landShakeR = wobble*0.6; }
+      else { landShakeR = wobble; landShakeL = wobble*0.6; }
+    }
+
     const Lres=solve2Bone(this.hipL, this.footL.pos, dim.thigh, dim.shin, bend);
     const LkBias = (this.state==='jump' || this.state==='fall') ? airRigidity : (this.footL.state==='stance'?kneeMinStance:kneeMinSwing);
-    const Lk = clamp(Lres.knee, LkBias, kneeMax);
+    let Lk = clamp(Lres.knee, LkBias, kneeMax);
+    Lk += landShakeL;
+    Lk = clamp(Lk, LkBias, kneeMax);
     b.lThigh.world.p=this.hipL; b.lThigh.world.a=Lres.hip;
     b.lShin.world.p=b.lThigh.end(); b.lShin.world.a=b.lThigh.world.a + (Lk*bend);
     b.lFoot.world.p=b.lShin.end(); b.lFoot.world.a=this.footL.ang;
 
     const Rres=solve2Bone(this.hipR, this.footR.pos, dim.thigh, dim.shin, bend);
     const RkBias = (this.state==='jump' || this.state==='fall') ? airRigidity : (this.footR.state==='stance'?kneeMinStance:kneeMinSwing);
-    const Rk = clamp(Rres.knee, RkBias, kneeMax);
+    let Rk = clamp(Rres.knee, RkBias, kneeMax);
+    Rk += landShakeR;
+    Rk = clamp(Rk, RkBias, kneeMax);
     b.rThigh.world.p=this.hipR; b.rThigh.world.a=Rres.hip;
     b.rShin.world.p=b.rThigh.end(); b.rShin.world.a=b.rThigh.world.a + (Rk*bend);
     b.rFoot.world.p=b.rShin.end(); b.rFoot.world.a=this.footR.ang;
@@ -776,7 +639,7 @@
   };
 
   Character.prototype.draw=function(){
-    const b=this.bones; const showBones=params.showBones.checked; const showTargets=params.showTargets.checked;
+    const b=this.bones;
 
     const gy=GROUND_Y(); ctx.strokeStyle='rgba(255,255,255,.08)'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(0,gy+0.5); ctx.lineTo(W,gy+0.5); ctx.stroke();
 
@@ -817,13 +680,6 @@
 
       for(const p of [b.pelvis.world.p, this.hipL, this.hipR, this.shoulderL, this.shoulderR, b.lThigh.end(), b.lShin.end(), b.lFoot.end(), b.rThigh.end(), b.rShin.end(), b.rFoot.end(), b.lArm.end(), b.lFore.end(), b.rArm.end(), b.rFore.end(), b.spine.end(), b.chest.end(), b.neck.end(), b.head.end()]) J(p);
     }
-
-    if(params.modeSel.value==='auto' && autoTracker.bbox){
-      const bb = autoTracker.bbox;
-      ctx.strokeStyle='rgba(255,255,255,.25)';
-      ctx.strokeRect(bb.x, bb.y, bb.w, bb.h);
-      ctx.beginPath(); ctx.arc(bb.cx, bb.cy, 3, 0, TAU); ctx.stroke();
-    }
   };
 
   // ================= Self tests =================
@@ -844,110 +700,25 @@
       const ch4=new Character(); ch4.grounded=false; ch4.jumpApex=true; ch4.vel.y=240; ch4.updateState(1/60);
       if(ch4.state!=='fall') throw new Error('fall transition failed');
 
-      out.textContent='OK (6/6)'; out.style.color='#a7f3d0';
+      out.textContent='OK (5/5)'; out.style.color='#a7f3d0';
     }catch(e){ out.textContent='FAIL'; out.style.color='#fecaca'; console.error('Self-tests failed', e); showErr(e.message); }
   }
-
-  // ================= Simulation helpers =================
-  let simJumpClock=0;
 
   // Fixed timestep
   let last=performance.now();
   let acc=0;
   const FIXED_STEP = 1/120;
 
-  // FPS calibration
-  let calibrating=false, calSum=0, calFrames=0, calTime=0;
-
-  // ================= Auto-tracker (very light demo) =================
-  const autoTracker = {
-    stream:null, video:null,
-    cnv:document.createElement('canvas'),
-    ctx:null, bg:null,
-    bbox:null
-  };
-  autoTracker.ctx = autoTracker.cnv.getContext('2d', { willReadFrequently:true });
-
-  async function startCamera(){
-    try{
-      autoTracker.stream = await navigator.mediaDevices.getUserMedia({video:true, audio:false});
-      autoTracker.video = document.createElement('video');
-      autoTracker.video.srcObject = autoTracker.stream;
-      autoTracker.video.setAttribute('playsinline','');
-      await autoTracker.video.play();
-      autoTracker.cnv.width = 320;
-      autoTracker.cnv.height = Math.floor(320*(autoTracker.video.videoHeight/Math.max(1,autoTracker.video.videoWidth)));
-      params.autoStatus.textContent='kamera: running';
-      setTimeout(()=>{ grabBackground(); }, 300);
-    }catch(e){
-      params.autoStatus.textContent='kamera: napaka (dovoljenja/HTTPS?)';
-      console.error(e); showErr(e.message);
-    }
-  }
-  function stopCamera(){
-    if(autoTracker.stream){ autoTracker.stream.getTracks().forEach(t=>t.stop()); }
-    autoTracker.stream=null; autoTracker.video=null; autoTracker.bg=null; autoTracker.bbox=null;
-    params.autoStatus.textContent='kamera: stop';
-  }
-  function grabBackground(){
-    if(!autoTracker.video) return;
-    const {cnv,ctx,video}=autoTracker;
-    ctx.drawImage(video,0,0,cnv.width,cnv.height);
-    autoTracker.bg = ctx.getImageData(0,0,cnv.width,cnv.height);
-  }
-  function updateAutoTracker(){
-    if(!autoTracker.video || !autoTracker.bg) return;
-    const {cnv,ctx,video}=autoTracker;
-    ctx.drawImage(video,0,0,cnv.width,cnv.height);
-    const frame = ctx.getImageData(0,0,cnv.width,cnv.height);
-    const bg = autoTracker.bg;
-
-    const data = frame.data, bgd=bg.data;
-    const w=cnv.width, h=cnv.height, len=w*h;
-    let minx=1e9, miny=1e9, maxx=-1e9, maxy=-1e9, count=0;
-    const TH=35;
-
-    for(let i=0;i<len;i++){
-      const k=i*4;
-      const dr=data[k]-bgd[k], dg=data[k+1]-bgd[k+1], db=data[k+2]-bgd[k+2];
-      const d = Math.abs(dr)+Math.abs(dg)+Math.abs(db);
-      if(d>TH){
-        const x=i%w, y=(i/w)|0;
-        if(x<minx)minx=x; if(y<miny)miny=y; if(x>maxx)maxx=x; if(y>maxy)maxy=y;
-        count++;
-      }
-    }
-    if(count>200){
-      const scaleX = W/cnv.width, scaleY = H/cnv.height;
-      const x=minx*scaleX, y=miny*scaleY, ww=(maxx-minx)*scaleX, hh=(maxy-miny)*scaleY;
-      autoTracker.bbox = { x, y, w: ww, h: hh, cx: x+ww/2, cy: y+hh/2 };
-    } else {
-      autoTracker.bbox = null;
-    }
-  }
-
   // ================= Main loop =================
   function frame(t){
     const dtRaw=(t-last)/1000; last=t; acc += dtRaw;
 
-    if(calibrating){
-      calFrames++; calTime += dtRaw; calSum += dtRaw;
-      if(calTime>=1.2){
-        const fps = calFrames / calSum;
-        profile.fpsComp = 60/Math.max(1, fps);
-        params.calStatus.textContent = `kalibrirano @ ~${fps.toFixed(1)}fps → comp ${profile.fpsComp.toFixed(2)}x`;
-        calibrating=false; calFrames=calTime=calSum=0;
-        saveProfile();
-      }
-    }
-
     while(acc >= FIXED_STEP){
-      const dt = FIXED_STEP * profile.fpsComp;
+      const dt = FIXED_STEP;
       character.control(dt);
       character.updateState(dt);
       character.stepFeet(dt);
       character.updateRig(dt);
-      updateAutoTracker();
       acc -= FIXED_STEP;
     }
 
@@ -955,7 +726,7 @@
     character.draw();
 
     ctx.save(); ctx.translate(12,60); ctx.fillStyle='rgba(207,231,255,.9)'; ctx.font='12px ui-sans-serif, system-ui,-apple-system,Segoe UI,Roboto';
-    ctx.fillText(`Mode: ${params.modeSel.value} | Stanje: ${character.state}${character.land.active?' (land)':''}`, 0, 0);
+    ctx.fillText(`Stanje: ${character.state}${character.land.active?' (land)':''}`, 0, 0);
     ctx.fillText(`Hitrost X: ${character.vel.x.toFixed(1)} px/s`, 0, 16);
     ctx.fillText(`Na tleh: ${character.grounded ? 'DA' : 'NE'} | v_y: ${character.vel.y.toFixed(1)} px/s`, 0, 32);
     ctx.restore();
@@ -990,29 +761,7 @@
   requestAnimationFrame(frame);
 
   // ================= UI events =================
-  const applySimLabels=()=>{
-    params.simSpeedVal.textContent = profile.speed;
-    params.simCadenceVal.textContent = profile.cadence;
-    params.simJumpVal.textContent = profile.jumpPeriod>0? (profile.jumpPeriod+'s') : 'izklopljeno';
-  };
-
-  params.modeSel.addEventListener('change', ()=>{
-    profile.mode = params.modeSel.value; saveProfile(); syncVisibility();
-    if(profile.mode==='auto' && !autoTracker.stream){ params.autoStatus.textContent='kamera: pripravljena (klikni Start)'; }
-  });
-
-  params.simSpeed.addEventListener('input', e=>{ profile.speed=+e.target.value; applySimLabels(); saveProfile(); });
-  params.simCadence.addEventListener('input', e=>{ profile.cadence=+e.target.value; applySimLabels(); saveProfile(); });
-  params.simJumpPeriod.addEventListener('input', e=>{ profile.jumpPeriod=+e.target.value; applySimLabels(); saveProfile(); });
-  params.simDir.addEventListener('change', e=>{ profile.dir=+e.target.value; saveProfile(); });
-
-  params.calibrateBtn.addEventListener('click', ()=>{ calibrating=true; params.calStatus.textContent='kalibriranje...'; });
-  params.saveProfile.addEventListener('click', saveProfile);
-  params.resetProfile.addEventListener('click', ()=>{
-    if(confirm('Resetiraj profil na privzeto?')){ profile={...defaultProfile}; saveProfile(); location.reload(); }
-  });
-  params.autoStart.addEventListener('click', startCamera);
-  params.autoStop.addEventListener('click', stopCamera);
+  // ni dodatnih UI dogodkov – vse upravlja tipkovnica
 })();
 </script>
 </body>
