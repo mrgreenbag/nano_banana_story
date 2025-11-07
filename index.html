@@ -346,7 +346,7 @@
       const cad = clamp(baseCad + 0.0045*speed, this.state==='run'?2.6:1.4, this.state==='run'?3.6:2.4);
       this.gaitCadence = cad;
 
-      const stepLen = clamp(20 + 0.36*speed, 26, (this.state==='run'? 98 : 80));
+      const stepLen = clamp(18 + 0.32*speed, 26, (this.state==='run'? 86 : 68));
 
       this.gaitLeft = (this.gaitLeft + this.gaitCadence*dt) % 1;
       const leftPhase=this.gaitLeft, rightPhase=(this.gaitLeft+0.5)%1;
@@ -354,10 +354,12 @@
       const rightInStance = rightPhase < this.stanceRatio;
       const swingDur = Math.max(0.06, (1-this.stanceRatio)/this.gaitCadence);
 
-      const minX=this.pos.x-(dim.thigh+dim.shin-8);
-      const maxX=this.pos.x+(dim.thigh+dim.shin-8);
+      const minX=this.pos.x-(dim.thigh+dim.shin-10);
+      const maxX=this.pos.x+(dim.thigh+dim.shin-10);
 
-      const front = stepLen*0.72;
+      const front = stepLen*0.55;
+      const trailing = stepLen*0.35;
+
       if(this.prevLeftInStance && !leftInStance && this.footL.state==='stance'){
         let tx=this.pos.x + dir*front; tx=clamp(tx,minX,maxX);
         this.footL.state='swing'; this.footL.progress=0; this.footL.target={x:tx,y:ground};
@@ -374,11 +376,20 @@
         else if (f.state==='swing' && f.target) {
           f.progress = Math.min(1, (f.progress||0) + dt/swingDur);
           const t=easeInOut(f.progress), tHeight=Math.pow(t,0.9);
-          const lift=(this.state==='run')?24:9;
+          const lift=(this.state==='run')?22:8;
           f.pos.x=lerp(f.anchor.x,f.target.x,t);
           f.pos.y=ground - Math.sin(Math.PI*tHeight)*lift;
           if(f.progress>=1){ f.state='stance'; f.anchor.x=f.target.x; f.pos.x=f.target.x; f.pos.y=ground; f.target=null; }
         }
+      }
+
+      if(leftInStance){
+        const desiredAnchor = this.pos.x - dir*trailing;
+        this.footL.anchor.x = lerp(this.footL.anchor.x, clamp(desiredAnchor, minX, maxX), Math.min(1, dt*5));
+      }
+      if(rightInStance){
+        const desiredAnchor = this.pos.x + dir*trailing;
+        this.footR.anchor.x = lerp(this.footR.anchor.x, clamp(desiredAnchor, minX, maxX), Math.min(1, dt*5));
       }
 
       if(leftInStance){ const s=leftPhase/this.stanceRatio; this.footL.ang += (baseAngle + roll.heelToFlat(Math.min(1,s)) - this.footL.ang)*Math.min(1,dt*12); }
@@ -452,11 +463,20 @@
     }
 
     if(this.state==='land' && this.stateTimer<=0 && this.grounded){
-      this.state = Math.abs(this.vel.x)>18 ? 'walk':'idle';
+      const targetState = Math.abs(this.vel.x)>18 ? 'walk':'idle';
+      this.state = targetState;
       this.land.active=false;
       const off=this.neutralFootOffset;
       this.footL.anchor.x = lerp(this.footL.anchor.x, this.pos.x-off, 0.6);
       this.footR.anchor.x = lerp(this.footR.anchor.x, this.pos.x+off, 0.6);
+      for(const f of [this.footL,this.footR]){
+        f.state='stance'; f.progress=0; f.target=null;
+        f.pos.y = GROUND_Y();
+        f.pos.x = f.anchor.x;
+      }
+      this.gaitLeft = 0;
+      this.prevLeftInStance = true;
+      this.prevRightInStance = true;
     }
 
     // ---- Physics / height pose
@@ -507,9 +527,11 @@
     let hipYOffsetL=0, hipYOffsetR=0;
     const isGaiting = this.grounded && (this.state==='walk' || this.state==='run');
     let leftInStance=true, rightInStance=true;
+    let leftPhase=this.gaitLeft;
+    let rightPhase=(this.gaitLeft+0.5)%1;
     if(isGaiting){
-      leftInStance  = (this.gaitLeft < this.stanceRatio);
-      rightInStance = (((this.gaitLeft + 0.5) % 1) < this.stanceRatio);
+      leftInStance  = (leftPhase < this.stanceRatio);
+      rightInStance = (rightPhase < this.stanceRatio);
       const hike = (this.state==='run'? 5 : 3);
       if(leftInStance && !rightInStance){ hipYOffsetR = -hike; hipYOffsetL = +hike*0.4; }
       else if(rightInStance && !leftInStance){ hipYOffsetL = -hike; hipYOffsetR = +hike*0.4; }
@@ -517,6 +539,10 @@
       const drop = clamp(this.vel.y/400, -0.5, 0.6);
       hipYOffsetL = drop * (this.facing>=0?-6:6);
       hipYOffsetR = drop * (this.facing>=0?6:-6);
+    } else {
+      const floatPhase=this.gaitClock%1;
+      leftPhase = floatPhase;
+      rightPhase = (floatPhase+0.5)%1;
     }
     this.hipL = vAdd(b.pelvis.world.p, V(-hipHalf, hipYOffsetL));
     this.hipR = vAdd(b.pelvis.world.p, V(+hipHalf, hipYOffsetR));
@@ -537,6 +563,15 @@
     const perp=V(-torsoDir.y, torsoDir.x), shHalf=(dim.shoulderSpacing)*0.5, drop=dim.shoulderDrop;
     this.shoulderL = vAdd(b.chest.world.p, vAdd(vMul(perp,-shHalf), V(0, drop)));
     this.shoulderR = vAdd(b.chest.world.p, vAdd(vMul(perp,+shHalf), V(0, drop)));
+    const moveAmount = clamp(Math.abs(this.vel.x)/(this.state==='run'?420:220), 0, 1);
+    const shoulderSwing = (this.state==='run'?6:(this.state==='walk'?3:0.6)) * (0.35 + 0.65*moveAmount);
+    const shoulderBob = (this.state==='run'?2.2:(this.state==='walk'?1.1:0.25)) * (0.25 + 0.75*moveAmount);
+    const lPhase = leftPhase;
+    const rPhase = rightPhase;
+    if(shoulderSwing>0){
+      this.shoulderL = vAdd(this.shoulderL, V(Math.sin(lPhase*TAU)*shoulderSwing, Math.cos(lPhase*TAU)*shoulderBob));
+      this.shoulderR = vAdd(this.shoulderR, V(Math.sin((rPhase*TAU)+Math.PI)*shoulderSwing, Math.cos((rPhase*TAU)+Math.PI)*shoulderBob));
+    }
 
     // ---- Legs IK
     const bend = this.facing >= 0 ? 1 : -1;
@@ -578,7 +613,7 @@
     if(this.state==='jumpAnticipation'){
       const total=this.wasRunningJump?0.10:0.16; const t=(total - this.stateTimer)/total;
       const back=lerp(0, -1.0, easeInOut(t));
-      lUpper=baseDown+back; rUpper=baseDown+back; lElbow=0.25; rElbow=0.25; lHandA=0.05; rHandA=0.05;
+      lUpper=baseDown+back; rUpper=baseDown+back; lElbow=0.25; rElbow=0.25; lHandA=-0.1; rHandA=-0.1;
     }
     else if(this.state==='jump'){
       const ascend = this.vel.y < -40 ? 1 : 0;
@@ -593,40 +628,40 @@
       lUpper = targL + jb;
       rUpper = targR - jb;
 
-      lElbow = ascend ? 0.35 : 0.50;
+      lElbow = ascend ? 0.32 : 0.48;
       rElbow = lElbow;
-      lHandA = ascend ? 0.08 : 0.12;
+      lHandA = ascend ? -0.05 : 0.06;
       rHandA = lHandA;
     }
     else if(this.state==='fall'){
-      const brace = easeOutSine(clamp(this.fallTimer/0.28,0,1));
-      const spread = 0.32 + brace*0.55;
-      lUpper = baseDown - spread;
-      rUpper = baseDown - spread;
-      const elbowBend = 0.75 - brace*0.28;
+      const reach = easeOutSine(clamp(this.fallTimer/0.22,0,1));
+      const arc = Math.PI*0.9 + reach*0.22;
+      lUpper = baseDown - arc;
+      rUpper = baseDown + arc;
+      const elbowBend = 0.42 - reach*0.22;
       lElbow = elbowBend;
       rElbow = elbowBend;
-      const handTilt = 0.20 + brace*0.25;
-      lHandA = handTilt;
-      rHandA = handTilt;
+      const handCurl = -0.18 + reach*0.45;
+      lHandA = handCurl;
+      rHandA = handCurl;
     }
     else if(this.state==='land'){
-      lUpper=baseDown-0.35; rUpper=baseDown-0.35; lElbow=0.55; rElbow=0.55; lHandA=0.15; rHandA=0.15;
+      lUpper=baseDown-0.35; rUpper=baseDown-0.35; lElbow=0.55; rElbow=0.55; lHandA=-0.05; rHandA=-0.05;
     }
     else{
-      const isGaiting = this.grounded && (this.state==='walk' || this.state==='run');
-      const leftPhase  = isGaiting ? this.gaitLeft : (0.25 + 0.25*Math.sin(this.gaitClock*TAU));
-      const rightPhase = (leftPhase + 0.5)%1;
-      const armAmp = (this.state==='run'? 1.00 : this.state==='walk'? 0.52 : 0.12);
-
+      const armAmp = (this.state==='run'? 1.05 : this.state==='walk'? 0.58 : 0.16);
+      const handSwing = (this.state==='run'? 0.38 : this.state==='walk'? 0.24 : 0.08);
       const lS = Math.sin((leftPhase)*TAU), rS = Math.sin((rightPhase)*TAU);
       const jitter = 0.06 * n1(this.t*3.1);
       lUpper = baseDown + (-armAmp)*rS + jitter;
       rUpper = baseDown + (+armAmp)*lS - jitter;
-      lElbow = lerp(0.6, 0.34, (1+Math.sin((rightPhase)*TAU))/2);
-      rElbow = lerp(0.6, 0.34, (1+Math.sin((leftPhase )*TAU))/2);
-      lHandA = 0.10 + 0.18*((1+Math.sin((rightPhase)*TAU))/2);
-      rHandA = 0.10 + 0.18*((1+Math.sin((leftPhase )*TAU))/2);
+      const rightBlend = (1+Math.sin((rightPhase)*TAU))/2;
+      const leftBlend  = (1+Math.sin((leftPhase )*TAU))/2;
+      lElbow = lerp(0.64, 0.36, rightBlend);
+      rElbow = lerp(0.64, 0.36, leftBlend);
+      const handBase = -0.28;
+      lHandA = handBase + handSwing*rightBlend;
+      rHandA = handBase + handSwing*leftBlend;
     }
 
     b.lArm.world.p=this.shoulderL; b.lArm.world.a=lUpper;
