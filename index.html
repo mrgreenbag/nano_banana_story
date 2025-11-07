@@ -21,7 +21,7 @@
   <div id="hint">
     Tipke: <span class="kbd">A</span>/<span class="kbd">D</span> – hoja/tek ·
     <span class="kbd">Shift</span> – tek · <span class="kbd">W</span>/<span class="kbd">Space</span> – skok ·
-    <span class="kbd">S</span> – počep / hitrejši padec · <span class="kbd">G</span> – mreža · <span class="kbd">B</span>/<span class="kbd">T</span> – kosti/tarče · <span class="kbd">R</span> – recenter
+    <span class="kbd">S</span> – počep / hitrejši padec · <span class="kbd">G</span> – mreža · <span class="kbd">B</span>/<span class="kbd">T</span> – kosti/tarče · <span class="kbd">P</span> – platforme · <span class="kbd">R</span> – recenter
   </div>
   <div id="tests">Self-tests: <span id="testsStatus">running…</span></div>
   <div id="err"></div>
@@ -37,6 +37,7 @@
   window.addEventListener('resize', () => {
     W = canvas.width = window.innerWidth;
     H = canvas.height = window.innerHeight;
+    rebuildPlatforms();
     snapToGroundOnResize();
   });
 
@@ -44,19 +45,59 @@
   const keys = new Set();
   let showBones = true;
   let showTargets = true;
-  const WANT_CODES = ['KeyW','Space','KeyA','KeyS','KeyD','ShiftLeft','ShiftRight','ArrowLeft','ArrowRight','ArrowDown','KeyG','KeyR','KeyB','KeyT'];
+  let platformsEnabled = false;
+  let platforms = [];
+  let platformSeed = 0;
+
+  const baseGroundY = () => H - 140;
+  const rebuildPlatforms = () => {
+    platforms = [];
+    if(!platformsEnabled) return;
+    const base = baseGroundY();
+    const span = Math.min(220, H*0.4);
+    const levels = 5;
+    const width = Math.max(160, W*0.22);
+    const stepY = span / levels;
+    const offsetX = ((platformSeed % 2)===0 ? 0.18 : 0.12) * W;
+    for(let i=1; i<=levels; i++){
+      const y = base - i*stepY;
+      const x = offsetX + ((i%2===0)? 0.34 : 0.12)*W;
+      platforms.push({x: clamp(x, 40, W-width-40), y, w: width, h: 12});
+    }
+  };
+  const groundAt = (x= W*0.5, fromY=-Infinity) => {
+    let best = null;
+    const consider = (y) => {
+      if(y >= fromY && (best===null || y < best)){
+        best = y;
+      }
+    };
+    consider(baseGroundY());
+    if(platformsEnabled){
+      for(const p of platforms){
+        if(x >= p.x && x <= p.x+p.w){
+          consider(p.y);
+        }
+      }
+    }
+    return best===null ? baseGroundY() : best;
+  };
+
+  const WANT_CODES = ['KeyW','Space','KeyA','KeyS','KeyD','ShiftLeft','ShiftRight','ArrowLeft','ArrowRight','ArrowDown','KeyG','KeyR','KeyB','KeyT','KeyP'];
   window.addEventListener('keydown', e => {
     const c=e.code;
     if(WANT_CODES.includes(c)) e.preventDefault();
     if(c==='KeyB') showBones=!showBones;
     else if(c==='KeyT') showTargets=!showTargets;
+    else if(c==='KeyP'){
+      platformsEnabled = !platformsEnabled;
+      platformSeed++;
+      rebuildPlatforms();
+      if(character) character.snapToGround(true);
+    }
     else keys.add(c);
   }, {passive:false});
   window.addEventListener('keyup',   e => keys.delete(e.code), {passive:false});
-
-  // ================= Params =================
-  const GROUND_Y = () => H - 140;
-
   // ================= Utils =================
   const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
   const lerp=(a,b,t)=>a+(b-a)*t;
@@ -96,7 +137,8 @@
       upperArm:26, forearm:24, hand:8
     };
 
-    this.pos=V(W*0.5, GROUND_Y() - this.base.pelvisToGround);
+    const initialGround = groundAt(W*0.5);
+    this.pos=V(W*0.5, initialGround - this.base.pelvisToGround);
     this.vel=V(0,0);
     this.prevVelY=0;
     this.grounded=true;
@@ -124,7 +166,7 @@
     b.rFore =new Bone('rFore', this.base.forearm).setParent(b.rArm);
     b.rHand =new Bone('rHand', this.base.hand   ).setParent(b.rFore);
 
-    const gy=GROUND_Y(); const off=18;
+    const gy=initialGround; const off=18;
     this.neutralFootOffset=off;
     this.footL={ pos:V(this.pos.x-off, gy), state:'stance', progress:0, anchor:V(this.pos.x-off, gy), ang:0 };
     this.footR={ pos:V(this.pos.x+off, gy), state:'stance', progress:0, anchor:V(this.pos.x+off, gy), ang:0 };
@@ -138,6 +180,8 @@
     this.takeoffTimer=0.0; this.jumpApex=false;
     this.land = { active:false, t:0, lead:null, impactVy:0, dipAmp:0.22, weightShift:0, delayCatch:0.08 };
     this.fallTimer=0;
+    this.groundTimer=0;
+    this.airTimer=0;
 
     this.gaitClock=0;
     this.state='idle';
@@ -206,21 +250,22 @@
       this.wasRunningJump=running;
     }
 
-    if(keys.has('KeyR')){
-      this.pos.x = W*0.5;
-      const dim = this.dim();
-      this.pos.y = GROUND_Y() - dim.pelvisToGround;
-      this.vel.x = 0; this.vel.y = 0;
-      const gy=GROUND_Y();
-      const off=this.neutralFootOffset;
-      this.footL.anchor=V(this.pos.x-off, gy);
-      this.footR.anchor=V(this.pos.x+off, gy);
-      this.footL.pos={...this.footL.anchor}; this.footR.pos={...this.footR.anchor};
-      this.grounded=true;
-      this.state='idle';
-      this.land.active=false;
-      this.fallTimer=0;
-    }
+      if(keys.has('KeyR')){
+        this.pos.x = W*0.5;
+        const dim = this.dim();
+        const gy = groundAt(this.pos.x, this.pos.y + dim.pelvisToGround + 1);
+        this.pos.y = gy - dim.pelvisToGround;
+        this.vel.x = 0; this.vel.y = 0;
+        const off=this.neutralFootOffset;
+        this.footL.anchor=V(this.pos.x-off, gy);
+        this.footR.anchor=V(this.pos.x+off, gy);
+        this.footL.pos={...this.footL.anchor}; this.footR.pos={...this.footR.anchor};
+        this.grounded=true;
+        this.state='idle';
+        this.land.active=false;
+        this.fallTimer=0;
+        this.groundTimer=0;
+      }
   };
 
   // 2-bone IK
@@ -240,14 +285,19 @@
   };
 
   Character.prototype.stepFeet=function(dt){
-    const dim=this.dim(); const ground=GROUND_Y(); const dir=(this.vel.x!==0? Math.sign(this.vel.x): this.facing);
+    const dim=this.dim(); 
+    const footRef = this.pos.y + dim.pelvisToGround + 1;
+    const groundBody = groundAt(this.pos.x, footRef);
+    const dir=(this.vel.x!==0? Math.sign(this.vel.x): this.facing);
+    const groundFor = (foot) => groundAt(foot.anchor?.x ?? foot.pos.x, footRef);
     const baseAngle = (this.facing>=0)?0:Math.PI;
+    const settle = clamp(this.groundTimer/0.25, 0, 1);
 
     if(this.state==='crouch' || this.state==='jumpAnticipation'){
       const off=this.neutralFootOffset;
       for(const f of [this.footL,this.footR]){ f.state='stance'; f.progress=0; f.target=null; f.ang += (baseAngle-f.ang)*Math.min(1,dt*12); }
       this.footL.anchor.x=this.pos.x-off; this.footR.anchor.x=this.pos.x+off;
-      this.footL.pos=V(this.footL.anchor.x,ground); this.footR.pos=V(this.footR.anchor.x,ground);
+      this.footL.pos=V(this.footL.anchor.x,groundFor(this.footL)); this.footR.pos=V(this.footR.anchor.x,groundFor(this.footR));
       return;
     }
 
@@ -262,7 +312,7 @@
 
       const pelvisToFoot = dim.pelvisToGround;
       const targetBaseY = this.pos.y + pelvisToFoot + (descending ? 6 : 4);
-      const yClamp = descending ? (ground - 2) : (ground - 18);
+      const yClamp = descending ? (groundBody - 2) : (groundBody - 18);
       const yBase = Math.min(yClamp, targetBaseY);
 
       const landingFront = descending ? leadBoost : 0;
@@ -274,11 +324,11 @@
 
       const targetL = V(
         this.pos.x - off + adjustL + jx*0.35,
-        descending ? ground - 1 : yBase + jy
+        descending ? groundBody - 1 : yBase + jy
       );
       const targetR = V(
         this.pos.x + off + adjustR - jx*0.35,
-        descending ? ground - 1 : yBase - jy
+        descending ? groundBody - 1 : yBase - jy
       );
 
       const k = Math.min(1, dt*(descending?18:12));
@@ -301,11 +351,13 @@
       const t = this.land.t;
       const lead = this.land.lead==='L' ? this.footL : this.footR;
       const trail= this.land.lead==='L' ? this.footR : this.footL;
+      const leadGround = groundFor(lead);
+      const trailGround = groundFor(trail);
 
       const hsDur=0.12, toeDur=0.09;
       const hs = clamp(t/hsDur,0,1);
       lead.ang = baseAngle + roll.heelToFlat(hs);
-      lead.state='stance'; lead.pos=V(lead.anchor.x, ground);
+      lead.state='stance'; lead.pos=V(lead.anchor.x, leadGround);
 
       if(t > this.land.delayCatch){
         if(trail.state!=='stance' && trail.target){
@@ -313,9 +365,10 @@
           const k= easeInOut(trail.progress);
           const lift=14;
           trail.pos.x = lerp(trail.anchor.x, trail.target.x, k);
-          trail.pos.y = ground - Math.sin(Math.PI*k)*lift;
+          const glideGround = groundAt(trail.target.x, footRef);
+          trail.pos.y = glideGround - Math.sin(Math.PI*k)*lift;
           if(trail.progress>=1){
-            trail.state='stance'; trail.anchor.x=trail.target.x; trail.pos=V(trail.target.x,ground); trail.target=null;
+            trail.state='stance'; trail.anchor.x=trail.target.x; trail.pos=V(trail.target.x,glideGround); trail.target=null;
           }
         }
       }
@@ -333,8 +386,12 @@
       if(Math.abs(this.vel.x)<8){
         this.footL.anchor.x = lerp(this.footL.anchor.x, this.pos.x-this.neutralFootOffset, Math.min(1,dt*4));
         this.footR.anchor.x = lerp(this.footR.anchor.x, this.pos.x+this.neutralFootOffset, Math.min(1,dt*4));
-        this.footL.pos=V(this.footL.anchor.x, ground);
-        this.footR.pos=V(this.footR.anchor.x, ground);
+        const supportL = groundAt(this.footL.anchor.x, footRef);
+        const supportR = groundAt(this.footR.anchor.x, footRef);
+        this.footL.anchor.y = supportL;
+        this.footR.anchor.y = supportR;
+        this.footL.pos=V(this.footL.anchor.x, supportL);
+        this.footR.pos=V(this.footR.anchor.x, supportR);
       }
       return;
     }
@@ -355,37 +412,48 @@
       const swingDur = Math.max(0.06, (1-this.stanceRatio)/this.gaitCadence);
 
       const strideN = clamp(speed/(this.state==='run'?420:220), 0, 1);
-      const front = this.state==='run' ? lerp(18, 38, strideN) : lerp(12, 22, strideN);
-      const trailing = this.state==='run' ? lerp(8, 18, strideN) : lerp(6, 12, strideN);
-      const lift = this.state==='run' ? lerp(6, 20, strideN) : lerp(3, 10, strideN);
+      const frontRaw = this.state==='run' ? lerp(18, 38, strideN) : lerp(12, 22, strideN);
+      const trailingRaw = this.state==='run' ? lerp(8, 18, strideN) : lerp(6, 12, strideN);
+      const liftRaw = this.state==='run' ? lerp(6, 20, strideN) : lerp(3, 10, strideN);
+      const front = lerp(this.state==='run'?10:6, frontRaw, settle);
+      const trailing = lerp(this.state==='run'?6:4, trailingRaw, settle);
+      const lift = lerp(this.state==='run'?4:2.5, liftRaw, settle);
 
       const minX=this.pos.x-(dim.thigh+dim.shin-10);
       const maxX=this.pos.x+(dim.thigh+dim.shin-10);
 
       if(this.prevLeftInStance && !leftInStance && this.footL.state==='stance'){
         let tx=this.pos.x + dir*front; tx=clamp(tx,minX,maxX);
-        this.footL.state='swing'; this.footL.progress=0; this.footL.target={x:tx,y:ground};
-        if(this.state==='walk'){ this.footR.state='stance'; this.footR.pos.y=ground; }
+        const ty = groundAt(tx, footRef);
+        this.footL.state='swing'; this.footL.progress=0; this.footL.target={x:tx,y:ty};
+        if(this.state==='walk'){ this.footR.state='stance'; this.footR.pos.y=groundAt(this.footR.anchor.x, footRef); }
       }
       if(this.prevRightInStance && !rightInStance && this.footR.state==='stance'){
         let tx=this.pos.x + dir*front; tx=clamp(tx,minX,maxX);
-        this.footR.state='swing'; this.footR.progress=0; this.footR.target={x:tx,y:ground};
-        if(this.state==='walk'){ this.footL.state='stance'; this.footL.pos.y=ground; }
+        const ty = groundAt(tx, footRef);
+        this.footR.state='swing'; this.footR.progress=0; this.footR.target={x:tx,y:ty};
+        if(this.state==='walk'){ this.footL.state='stance'; this.footL.pos.y=groundAt(this.footL.anchor.x, footRef); }
       }
 
       for (const f of [this.footL, this.footR]) {
         if (f.state==='stance') {
-          f.pos.x=f.anchor.x; f.pos.y=ground;
+            const support = groundAt(f.anchor.x, footRef);
+          f.pos.x=f.anchor.x; f.pos.y=support;
         } else if (f.state==='swing' && f.target) {
           f.progress = Math.min(1, (f.progress||0) + dt/swingDur);
           const t=easeInOut(f.progress), tHeight=Math.pow(t,0.9);
           const liftAmt = lerp(4, lift, tHeight);
+          const targetGround = groundAt(f.target.x, footRef);
+          const anchorGround = groundAt(f.anchor.x, footRef);
+          const support = lerp(anchorGround, targetGround, t);
           f.pos.x=lerp(f.anchor.x,f.target.x,t);
-          f.pos.y=ground - Math.sin(Math.PI*tHeight)*liftAmt;
+          f.pos.y=support - Math.sin(Math.PI*tHeight)*liftAmt;
           if(f.progress>=1){
             f.state='stance';
             f.anchor.x=f.target.x;
-            f.pos.x=f.target.x; f.pos.y=ground;
+            const landingGround = groundAt(f.target.x, footRef);
+            f.anchor.y=landingGround;
+            f.pos.x=f.target.x; f.pos.y=landingGround;
             f.target=null;
           }
         }
@@ -427,12 +495,36 @@
       const off=this.neutralFootOffset;
       this.footL.anchor.x = lerp(this.footL.anchor.x, this.pos.x-off, Math.min(1, dt*6));
       this.footR.anchor.x = lerp(this.footR.anchor.x, this.pos.x+off, Math.min(1, dt*6));
-      this.footL.pos=V(this.footL.anchor.x, ground);
-      this.footR.pos=V(this.footR.anchor.x, ground);
+      this.footL.anchor.y = groundAt(this.footL.anchor.x, footRef);
+      this.footR.anchor.y = groundAt(this.footR.anchor.x, footRef);
+      this.footL.pos=V(this.footL.anchor.x, groundAt(this.footL.anchor.x, footRef));
+      this.footR.pos=V(this.footR.anchor.x, groundAt(this.footR.anchor.x, footRef));
       this.footL.ang += (baseAngle - this.footL.ang)*Math.min(1, dt*8);
       this.footR.ang += (baseAngle - this.footR.ang)*Math.min(1, dt*8);
       return;
     }
+  };
+
+  Character.prototype.snapToGround=function(resetVel=false){
+    const dim = this.dim();
+    const gy = groundAt(this.pos.x, this.pos.y + dim.pelvisToGround + 1);
+    this.pos.y = gy - dim.pelvisToGround;
+    if(resetVel){ this.vel.y = 0; this.vel.x *= 0.6; }
+    this.grounded = true;
+    this.groundTimer = 0;
+    this.airTimer = 0;
+    const footRef = this.pos.y + dim.pelvisToGround + 1;
+    const off = this.neutralFootOffset;
+    this.footL.anchor=V(this.pos.x-off, groundAt(this.pos.x-off, footRef));
+    this.footR.anchor=V(this.pos.x+off, groundAt(this.pos.x+off, footRef));
+    this.footL.pos={...this.footL.anchor};
+    this.footR.pos={...this.footR.anchor};
+    this.footL.state='stance'; this.footR.state='stance';
+    this.footL.target=this.footR.target=null;
+    this.prevLeftInStance=true;
+    this.prevRightInStance=true;
+    this.gaitLeft=0;
+    this.state='idle';
   };
 
   Character.prototype.updateRig=function(dt){
@@ -469,40 +561,48 @@
       this.land.impactVy = Math.abs(this.prevVelY);
       this.land.dipAmp = clamp(0.12 + (this.land.impactVy-350)/1200 * 0.18, 0.12, 0.30);
 
-      const off=this.neutralFootOffset, g=GROUND_Y();
-      const fSign = (this.facing>=0)?1:-1;
-      const small = 10;
-      if(this.land.lead==='L'){
-        this.footL.anchor.x = this.pos.x + fSign*(off+small);
-        this.footR.state='swing'; this.footR.progress=0; this.footR.target={x: this.pos.x - fSign*(off*0.6), y:g};
-      }else{
-        this.footR.anchor.x = this.pos.x + fSign*(off+small);
-        this.footL.state='swing'; this.footL.progress=0; this.footL.target={x: this.pos.x - fSign*(off*0.6), y:g};
-      }
-      this.footL.pos.y=this.footR.pos.y=g;
-      const base = (this.facing>=0)?0:Math.PI;
-      this.footL.ang=base; this.footR.ang=base;
+        const off=this.neutralFootOffset;
+        const fSign = (this.facing>=0)?1:-1;
+        const small = 10;
+        const contactRef = this.pos.y + dim.pelvisToGround + 1;
+        if(this.land.lead==='L'){
+          this.footL.anchor.x = this.pos.x + fSign*(off+small);
+          this.footL.anchor.y = groundAt(this.footL.anchor.x, contactRef);
+          this.footR.state='swing'; this.footR.progress=0; this.footR.target={x: this.pos.x - fSign*(off*0.6), y:groundAt(this.pos.x - fSign*(off*0.6), contactRef)};
+        }else{
+          this.footR.anchor.x = this.pos.x + fSign*(off+small);
+          this.footR.anchor.y = groundAt(this.footR.anchor.x, contactRef);
+          this.footL.state='swing'; this.footL.progress=0; this.footL.target={x: this.pos.x - fSign*(off*0.6), y:groundAt(this.pos.x - fSign*(off*0.6), contactRef)};
+        }
+        this.footL.pos.y=groundAt(this.footL.anchor.x, contactRef);
+        this.footR.pos.y=groundAt(this.footR.anchor.x, contactRef);
+        const base = (this.facing>=0)?0:Math.PI;
+        this.footL.ang=base; this.footR.ang=base;
     }
 
     if(this.state==='land' && this.stateTimer<=0 && this.grounded){
-      const targetState = Math.abs(this.vel.x)>18 ? 'walk':'idle';
-      this.state = targetState;
-      this.land.active=false;
-      const off=this.neutralFootOffset;
-      this.footL.anchor.x = lerp(this.footL.anchor.x, this.pos.x-off, 0.6);
-      this.footR.anchor.x = lerp(this.footR.anchor.x, this.pos.x+off, 0.6);
-      for(const f of [this.footL,this.footR]){
-        f.state='stance'; f.progress=0; f.target=null;
-        f.pos.y = GROUND_Y();
-        f.pos.x = f.anchor.x;
-      }
+        const targetState = Math.abs(this.vel.x)>18 ? 'walk':'idle';
+        this.state = targetState;
+        this.land.active=false;
+        const off=this.neutralFootOffset;
+        this.footL.anchor.x = lerp(this.footL.anchor.x, this.pos.x-off, 0.6);
+        this.footR.anchor.x = lerp(this.footR.anchor.x, this.pos.x+off, 0.6);
+        const settleRef = this.pos.y + dim.pelvisToGround + 1;
+        for(const f of [this.footL,this.footR]){
+          f.state='stance'; f.progress=0; f.target=null;
+          const support = groundAt(f.anchor.x, settleRef);
+          f.anchor.y = support;
+          f.pos.y = support;
+          f.pos.x = f.anchor.x;
+        }
       this.gaitLeft = 0;
       this.prevLeftInStance = true;
       this.prevRightInStance = true;
     }
 
     // ---- Physics / height pose
-    const ground = GROUND_Y();
+    const footProbe = this.pos.y + dim.pelvisToGround + Math.max(0, this.vel.y*dt) + 1;
+    const ground = groundAt(this.pos.x, footProbe);
     let poseHeightFactor = 1.0;
     if(this.state==='crouch'){
       poseHeightFactor=0.62;
@@ -526,6 +626,13 @@
     const minY = ground - desiredPelvis;
     if (this.pos.y >= minY) { this.pos.y = minY; if (this.vel.y > 0) this.vel.y = 0; this.grounded = true; }
     else { this.grounded = false; }
+    if(this.grounded){
+      this.groundTimer = Math.min(this.groundTimer + dt, 2);
+      this.airTimer = 0;
+    } else {
+      this.airTimer = Math.min(this.airTimer + dt, 2);
+      this.groundTimer = 0;
+    }
 
     // keep in view horizontally
     this.pos.x = clamp(this.pos.x, 40, W-40);
@@ -598,7 +705,9 @@
     // ---- Legs IK
     const bend = this.facing >= 0 ? 1 : -1;
     const airRigidity = 0.20;
-    let kneeMinStance = 0.06, kneeMinSwing = 0.12, kneeMax=2.4;
+    let kneeMinStance = 0.06;
+    let kneeMinSwing = (this.state==='run'?0.10:0.06);
+    const kneeMax=2.4;
     if(this.state==='land') kneeMinStance = 0.18;
     if(this.state==='fall'){ kneeMinSwing = 0.32; kneeMinStance = 0.24; }
 
@@ -699,7 +808,18 @@
   Character.prototype.draw=function(){
     const b=this.bones;
 
-    const gy=GROUND_Y(); ctx.strokeStyle='rgba(255,255,255,.08)'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(0,gy+0.5); ctx.lineTo(W,gy+0.5); ctx.stroke();
+    const gy=baseGroundY(); ctx.strokeStyle='rgba(255,255,255,.08)'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(0,gy+0.5); ctx.lineTo(W,gy+0.5); ctx.stroke();
+    if(platformsEnabled){
+      ctx.fillStyle='rgba(59,130,246,0.18)';
+      ctx.strokeStyle='rgba(125,211,252,0.45)';
+      ctx.lineWidth=2;
+      for(const p of platforms){
+        ctx.beginPath();
+        ctx.rect(p.x, p.y, p.w, p.h);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
 
     if(keys.has('KeyG')){ ctx.strokeStyle='rgba(255,255,255,.05)'; for(let x=0;x<W;x+=40){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); } for(let y=0;y<H;y+=40){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); } }
 
@@ -787,22 +907,15 @@
     ctx.fillText(`Stanje: ${character.state}${character.land.active?' (land)':''}`, 0, 0);
     ctx.fillText(`Hitrost X: ${character.vel.x.toFixed(1)} px/s`, 0, 16);
     ctx.fillText(`Na tleh: ${character.grounded ? 'DA' : 'NE'} | v_y: ${character.vel.y.toFixed(1)} px/s`, 0, 32);
+    ctx.fillText(`Platforme: ${platformsEnabled ? 'vključene' : 'izklopljene'}`, 0, 48);
     ctx.restore();
 
     requestAnimationFrame(frame);
   }
 
   function snapToGroundOnResize(){
-    const gy = GROUND_Y();
     if (!character) return;
-    character.footL.anchor.y = gy;
-    character.footR.anchor.y = gy;
-    character.footL.pos.y = gy;
-    character.footR.pos.y = gy;
-    if (character.grounded) {
-      const dim = character.dim();
-      character.pos.y = gy - dim.pelvisToGround;
-    }
+    character.snapToGround(true);
   }
 
   function showErr(msg){
