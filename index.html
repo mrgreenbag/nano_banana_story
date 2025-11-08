@@ -13,6 +13,9 @@
     #tests{position:fixed; top:12px; left:12px; padding:6px 10px; border-radius:10px; border:1px solid rgba(255,255,255,.08); background:rgba(20,27,38,.58); font-size:12px}
     #err{position:fixed; left:50%; transform:translateX(-50%); bottom:12px; max-width:80vw; padding:8px 12px; border-radius:10px; border:1px solid rgba(255,80,80,.35); background:rgba(255,80,80,.1); color:#fecaca; font-size:12px; display:none}
     canvas{display:block; width:100vw; height:100vh}
+    #kneeDebug{position:fixed; bottom:24px; left:24px; padding:10px 12px; border-radius:12px; border:1px solid rgba(125,211,252,.18); background:rgba(15,23,42,.68); color:var(--fg); font-size:12px; display:flex; gap:10px; align-items:center; z-index:50}
+    #kneeDebug label{display:flex; flex-direction:column; gap:6px; font-weight:600}
+    #kneeFlexRange{width:140px}
   </style>
 </head>
 <body>
@@ -45,6 +48,7 @@
   const keys = new Set();
   let showBones = true;
   let showTargets = true;
+  let kneeFlex = 0.55;
   let platformsEnabled = false;
   let platforms = [];
   let platformSeed = 0;
@@ -83,7 +87,7 @@
     return best===null ? baseGroundY() : best;
   };
 
-  const WANT_CODES = ['KeyW','Space','KeyA','KeyS','KeyD','ShiftLeft','ShiftRight','ArrowLeft','ArrowRight','ArrowDown','KeyG','KeyR','KeyB','KeyT','KeyP'];
+  const WANT_CODES = ['KeyW','Space','KeyA','KeyS','KeyD','ShiftLeft','ShiftRight','ArrowLeft','ArrowRight','ArrowDown','ArrowUp','KeyG','KeyR','KeyB','KeyT','KeyP'];
   window.addEventListener('keydown', e => {
     const c=e.code;
     if(WANT_CODES.includes(c)) e.preventDefault();
@@ -98,6 +102,31 @@
     else keys.add(c);
   }, {passive:false});
   window.addEventListener('keyup',   e => keys.delete(e.code), {passive:false});
+
+  const kneeDebug = document.createElement('div');
+  kneeDebug.id = 'kneeDebug';
+  const kneeLabel = document.createElement('label');
+  kneeLabel.textContent = 'Kolena · prožnost';
+  const kneeSlider = document.createElement('input');
+  kneeSlider.type='range';
+  kneeSlider.min='0';
+  kneeSlider.max='1';
+  kneeSlider.step='0.01';
+  kneeSlider.value=String(kneeFlex);
+  kneeSlider.id='kneeFlexRange';
+  const kneeVal = document.createElement('span');
+  const updateKneeUI=()=>{
+    kneeVal.textContent = `${Math.round(kneeFlex*100)}%`;
+  };
+  updateKneeUI();
+  kneeSlider.addEventListener('input', ()=>{
+    kneeFlex = parseFloat(kneeSlider.value);
+    updateKneeUI();
+  });
+  kneeLabel.appendChild(kneeSlider);
+  kneeLabel.appendChild(kneeVal);
+  kneeDebug.appendChild(kneeLabel);
+  document.body.appendChild(kneeDebug);
   // ================= Utils =================
   const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
   const lerp=(a,b,t)=>a+(b-a)*t;
@@ -176,9 +205,10 @@
 
     this.gaitLeft=0; this.stanceRatio=0.62; this.gaitCadence=1.8;
     this.prevLeftInStance=true; this.prevRightInStance=true;
+    this.prevStepDir=this.facing;
 
     this.takeoffTimer=0.0; this.jumpApex=false;
-    this.land = { active:false, t:0, lead:null, impactVy:0, dipAmp:0.22, weightShift:0, delayCatch:0.08 };
+    this.land = { active:false, t:0, lead:null, impactVy:0, dipAmp:lerp(0.10,0.24,kneeFlex), weightShift:0, delayCatch:0.08 };
     this.fallTimer=0;
     this.groundTimer=0;
     this.airTimer=0;
@@ -217,38 +247,43 @@
     }
   };
 
-  Character.prototype.control=function(dt){
-    const accelWalk=2200, accelRun=3800, maxWalk=180, maxRun=420, friction=8;
-    const left  = keys.has('KeyA') || keys.has('ArrowLeft');
-    const right = keys.has('KeyD') || keys.has('ArrowRight');
-    const wantsRun = keys.has('ShiftLeft') || keys.has('ShiftRight');
-    const crouching = (keys.has('KeyS') || keys.has('ArrowDown')) && this.grounded;
+    Character.prototype.control=function(dt){
+      const accelWalk=2200, accelRun=3800, maxWalk=180, maxRun=420, friction=8;
+      const left  = keys.has('KeyA') || keys.has('ArrowLeft');
+      const right = keys.has('KeyD') || keys.has('ArrowRight');
+      const wantsRun = keys.has('ShiftLeft') || keys.has('ShiftRight');
+      const crouching = (keys.has('KeyS') || keys.has('ArrowDown')) && this.grounded;
+      const wantsJump = keys.has('KeyW') || keys.has('Space') || keys.has('ArrowUp');
 
-    if(left && !right) this.facing=-1; else if(right && !left) this.facing=1;
-    const horiz=(left?-1:0)+(right?1:0);
+      if(left && !right) this.facing=-1;
+      else if(right && !left) this.facing=1;
+      const horiz=(left?-1:0)+(right?1:0);
 
-    const maxSpd=crouching? maxWalk*0.35 : (wantsRun? maxRun : maxWalk);
-    const accel =crouching? accelWalk*0.25 : (wantsRun? accelRun : accelWalk);
+      const maxSpd=crouching? maxWalk*0.35 : (wantsRun? maxRun : maxWalk);
+      const accel =crouching? accelWalk*0.25 : (wantsRun? accelRun : accelWalk);
 
-    const desired=horiz*maxSpd;
-    const delta=desired-this.vel.x;
-    const airScale=this.grounded?1:0.42;
-    this.vel.x += clamp(delta*10, -accel, accel)*dt*airScale;
+      const desired=horiz*maxSpd;
+      const delta=desired-this.vel.x;
+      const airScale=this.grounded?1:0.42;
+      this.vel.x += clamp(delta*10, -accel, accel)*dt*airScale;
 
-    if(horiz===0 && this.grounded){ this.vel.x*=Math.exp(-friction*dt); if(Math.abs(this.vel.x)<1) this.vel.x=0; }
+      if(horiz===0 && this.grounded){
+        this.vel.x*=Math.exp(-friction*dt);
+        if(Math.abs(this.vel.x)<1) this.vel.x=0;
+      }
 
-    if(!this.grounded){
-      const sideDamp = Math.exp(-(wantsRun?1.6:2.6)*dt);
-      if(horiz===0) this.vel.x*=sideDamp;
-      if(keys.has('KeyS') || keys.has('ArrowDown')) this.vel.y += 900*dt;
-    }
+      if(!this.grounded){
+        const sideDamp = Math.exp(-(wantsRun?1.6:2.6)*dt);
+        if(horiz===0) this.vel.x*=sideDamp;
+        if(keys.has('KeyS') || keys.has('ArrowDown')) this.vel.y += 900*dt;
+      }
 
-    if((keys.has('KeyW') || keys.has('Space')) && this.grounded && this.state!=='jumpAnticipation' && !crouching){
-      const running=Math.abs(this.vel.x)>maxWalk*0.8;
-      this.state='jumpAnticipation';
-      this.stateTimer= running? 0.10 : 0.16;
-      this.wasRunningJump=running;
-    }
+      if(wantsJump && this.grounded && this.state!=='jumpAnticipation' && !crouching){
+        const running=Math.abs(this.vel.x)>maxWalk*0.8;
+        this.state='jumpAnticipation';
+        this.stateTimer= running? 0.10 : 0.16;
+        this.wasRunningJump=running;
+      }
 
       if(keys.has('KeyR')){
         this.pos.x = W*0.5;
@@ -266,7 +301,7 @@
         this.fallTimer=0;
         this.groundTimer=0;
       }
-  };
+    };
 
   // 2-bone IK
   function solve2Bone(root, target, L1, L2, bendDir=1){
@@ -288,16 +323,23 @@
     const dim=this.dim(); 
     const footRef = this.pos.y + dim.pelvisToGround + 1;
     const groundBody = groundAt(this.pos.x, footRef);
-    const dir=(this.vel.x!==0? Math.sign(this.vel.x): this.facing);
+    const movingX = Math.abs(this.vel.x)>12 ? Math.sign(this.vel.x) : 0;
+    const dir = movingX!==0 ? movingX : this.facing;
     const groundFor = (foot) => groundAt(foot.anchor?.x ?? foot.pos.x, footRef);
     const baseAngle = (this.facing>=0)?0:Math.PI;
     const settle = clamp(this.groundTimer/0.25, 0, 1);
+    const dirChanged = dir !== this.prevStepDir;
 
     if(this.state==='crouch' || this.state==='jumpAnticipation'){
       const off=this.neutralFootOffset;
       for(const f of [this.footL,this.footR]){ f.state='stance'; f.progress=0; f.target=null; f.ang += (baseAngle-f.ang)*Math.min(1,dt*12); }
-      this.footL.anchor.x=this.pos.x-off; this.footR.anchor.x=this.pos.x+off;
-      this.footL.pos=V(this.footL.anchor.x,groundFor(this.footL)); this.footR.pos=V(this.footR.anchor.x,groundFor(this.footR));
+        this.footL.anchor.x=this.pos.x-off; this.footR.anchor.x=this.pos.x+off;
+        const supportL = groundFor(this.footL);
+        const supportR = groundFor(this.footR);
+        this.footL.anchor.y = supportL;
+        this.footR.anchor.y = supportR;
+        this.footL.pos=V(this.footL.anchor.x,supportL); this.footR.pos=V(this.footR.anchor.x,supportR);
+        this.prevStepDir = dir;
       return;
     }
 
@@ -339,10 +381,11 @@
 
       const rollPrep = descending ? clamp((this.vel.y+160)/420,0,1) : 0;
       const prepAng = roll.flatToToe(rollPrep);
-      this.footL.ang += (baseAngle + prepAng - this.footL.ang)*Math.min(1,dt*12);
-      this.footR.ang += (baseAngle + prepAng - this.footR.ang)*Math.min(1,dt*12);
+        this.footL.ang += (baseAngle + prepAng - this.footL.ang)*Math.min(1,dt*12);
+        this.footR.ang += (baseAngle + prepAng - this.footR.ang)*Math.min(1,dt*12);
 
-      this.footL.state='swing'; this.footR.state='swing';
+        this.footL.state='swing'; this.footR.state='swing';
+        this.prevStepDir = dir;
       return;
     }
 
@@ -383,16 +426,17 @@
         trail.ang += (baseAngle - trail.ang)*Math.min(1,dt*8);
       }
 
-      if(Math.abs(this.vel.x)<8){
-        this.footL.anchor.x = lerp(this.footL.anchor.x, this.pos.x-this.neutralFootOffset, Math.min(1,dt*4));
-        this.footR.anchor.x = lerp(this.footR.anchor.x, this.pos.x+this.neutralFootOffset, Math.min(1,dt*4));
-        const supportL = groundAt(this.footL.anchor.x, footRef);
-        const supportR = groundAt(this.footR.anchor.x, footRef);
-        this.footL.anchor.y = supportL;
-        this.footR.anchor.y = supportR;
-        this.footL.pos=V(this.footL.anchor.x, supportL);
-        this.footR.pos=V(this.footR.anchor.x, supportR);
-      }
+        if(Math.abs(this.vel.x)<8){
+          this.footL.anchor.x = lerp(this.footL.anchor.x, this.pos.x-this.neutralFootOffset, Math.min(1,dt*4));
+          this.footR.anchor.x = lerp(this.footR.anchor.x, this.pos.x+this.neutralFootOffset, Math.min(1,dt*4));
+          const supportL = groundAt(this.footL.anchor.x, footRef);
+          const supportR = groundAt(this.footR.anchor.x, footRef);
+          this.footL.anchor.y = supportL;
+          this.footR.anchor.y = supportR;
+          this.footL.pos=V(this.footL.anchor.x, supportL);
+          this.footR.pos=V(this.footR.anchor.x, supportR);
+        }
+        this.prevStepDir = dir;
       return;
     }
 
@@ -421,6 +465,30 @@
 
       const minX=this.pos.x-(dim.thigh+dim.shin-10);
       const maxX=this.pos.x+(dim.thigh+dim.shin-10);
+
+      if(dirChanged && this.grounded){
+        const lead = dir>=0 ? this.footR : this.footL;
+        const trail = dir>=0 ? this.footL : this.footR;
+        const leadFront = clamp(this.pos.x + dir*(front*0.9 + this.neutralFootOffset*0.6), minX, maxX);
+        const leadGround = groundAt(leadFront, footRef);
+        lead.state='swing';
+        lead.progress=0;
+        lead.target={x:leadFront, y:leadGround};
+
+        const trailAnchorX = clamp(this.pos.x - dir*trailing, minX, maxX);
+        const trailGround = groundAt(trailAnchorX, footRef);
+        trail.state='stance';
+        trail.progress=0;
+        trail.target=null;
+        trail.anchor.x = trailAnchorX;
+        trail.anchor.y = trailGround;
+        trail.pos.x = trailAnchorX;
+        trail.pos.y = trailGround;
+
+        this.prevLeftInStance = true;
+        this.prevRightInStance = true;
+        this.gaitLeft = dir>=0 ? (this.stanceRatio*0.35) : (this.stanceRatio + 0.35)%1;
+      }
 
       if(this.prevLeftInStance && !leftInStance && this.footL.state==='stance'){
         let tx=this.pos.x + dir*front; tx=clamp(tx,minX,maxX);
@@ -487,22 +555,24 @@
         this.footR.ang += (targetAng - this.footR.ang)*Math.min(1,dt*10);
       }
 
-      this.prevLeftInStance=leftInStance; this.prevRightInStance=rightInStance;
-      return;
+        this.prevLeftInStance=leftInStance; this.prevRightInStance=rightInStance;
+        this.prevStepDir = dir;
+        return;
     }
 
-    if(this.grounded){
-      const off=this.neutralFootOffset;
-      this.footL.anchor.x = lerp(this.footL.anchor.x, this.pos.x-off, Math.min(1, dt*6));
-      this.footR.anchor.x = lerp(this.footR.anchor.x, this.pos.x+off, Math.min(1, dt*6));
-      this.footL.anchor.y = groundAt(this.footL.anchor.x, footRef);
-      this.footR.anchor.y = groundAt(this.footR.anchor.x, footRef);
-      this.footL.pos=V(this.footL.anchor.x, groundAt(this.footL.anchor.x, footRef));
-      this.footR.pos=V(this.footR.anchor.x, groundAt(this.footR.anchor.x, footRef));
-      this.footL.ang += (baseAngle - this.footL.ang)*Math.min(1, dt*8);
-      this.footR.ang += (baseAngle - this.footR.ang)*Math.min(1, dt*8);
-      return;
-    }
+      if(this.grounded){
+        const off=this.neutralFootOffset;
+        this.footL.anchor.x = lerp(this.footL.anchor.x, this.pos.x-off, Math.min(1, dt*6));
+        this.footR.anchor.x = lerp(this.footR.anchor.x, this.pos.x+off, Math.min(1, dt*6));
+        this.footL.anchor.y = groundAt(this.footL.anchor.x, footRef);
+        this.footR.anchor.y = groundAt(this.footR.anchor.x, footRef);
+        this.footL.pos=V(this.footL.anchor.x, groundAt(this.footL.anchor.x, footRef));
+        this.footR.pos=V(this.footR.anchor.x, groundAt(this.footR.anchor.x, footRef));
+        this.footL.ang += (baseAngle - this.footL.ang)*Math.min(1, dt*8);
+        this.footR.ang += (baseAngle - this.footR.ang)*Math.min(1, dt*8);
+        this.prevStepDir = dir;
+        return;
+      }
   };
 
   Character.prototype.snapToGround=function(resetVel=false){
@@ -532,6 +602,7 @@
 
     const dim=this.dim();
     const b=this.bones; // referenca
+    const flex = clamp(kneeFlex,0,1);
 
     this.stateTimer=Math.max(0, this.stateTimer - dt);
 
@@ -559,7 +630,9 @@
       this.land.lead = Llead ? 'L' : 'R';
       this.land.active=true; this.land.t=0; this.state='land'; this.stateTimer=0.26;
       this.land.impactVy = Math.abs(this.prevVelY);
-      this.land.dipAmp = clamp(0.12 + (this.land.impactVy-350)/1200 * 0.18, 0.12, 0.30);
+      const dipBase = lerp(0.10, 0.24, flex);
+      const dipScale = lerp(0.12, 0.30, flex);
+      this.land.dipAmp = clamp(dipBase + (this.land.impactVy-300)/1100 * dipScale, dipBase, dipBase + dipScale);
 
         const off=this.neutralFootOffset;
         const fSign = (this.facing>=0)?1:-1;
@@ -605,16 +678,18 @@
     const ground = groundAt(this.pos.x, footProbe);
     let poseHeightFactor = 1.0;
     if(this.state==='crouch'){
-      poseHeightFactor=0.62;
+      poseHeightFactor=lerp(0.72, 0.52, flex);
     } else if(this.state==='jumpAnticipation'){
       const total=this.wasRunningJump?0.10:0.16; const t=1-(this.stateTimer/total);
-      poseHeightFactor=lerp(1.0,0.80,easeInOut(t));
+      const crouchAim = lerp(0.84, 0.64, flex);
+      poseHeightFactor=lerp(1.0,crouchAim,easeInOut(t));
     } else if(this.state==='land'){
       const t = clamp(this.land.t/0.24,0,1);
-      poseHeightFactor = 1.0 - Math.sin(t*Math.PI)*this.land.dipAmp;
+      const dipMult = lerp(1.0, 1.25, flex);
+      poseHeightFactor = 1.0 - Math.sin(t*Math.PI)*this.land.dipAmp*dipMult;
     } else if(this.state==='fall'){
       const t = clamp(this.fallTimer/0.35,0,1);
-      poseHeightFactor = 1.0 - 0.04*easeOutSine(t);
+      poseHeightFactor = 1.0 - easeOutSine(t)*lerp(0.04, 0.10, flex);
     }
     const desiredPelvis = dim.pelvisToGround * poseHeightFactor;
 
@@ -645,7 +720,8 @@
     const speedTerm = Math.abs(this.vel.x)*0.02;
     const cadence = (this.state==='run'?3 : this.state==='walk'?1.9 : 0.5);
     this.gaitClock += (speedTerm + cadence*0.16) * dt;
-    const bob = this.grounded ? Math.sin(this.gaitClock*TAU) * (this.state==='run'?4 : this.state==='walk'?1.6 : 0.4) : (this.state==='fall'? -2 : 0);
+    const bobScale = lerp(0.6, 1.1, flex);
+    const bob = this.grounded ? Math.sin(this.gaitClock*TAU) * (this.state==='run'?4*bobScale : this.state==='walk'?1.6*bobScale : 0.4*bobScale) : (this.state==='fall'? -2 : 0);
 
     // ---- Pelvis
     b.pelvis.world.p = V(this.pos.x, this.pos.y + bob);
@@ -672,6 +748,15 @@
       const floatPhase=this.gaitClock%1;
       leftPhase = floatPhase;
       rightPhase = (floatPhase+0.5)%1;
+    }
+    if(this.state==='crouch'){
+      const crouchDrop = lerp(6, 12, flex);
+      hipYOffsetL -= crouchDrop;
+      hipYOffsetR -= crouchDrop;
+    } else if(this.state==='land'){
+      const absorb = this.land.dipAmp * lerp(18, 28, flex);
+      hipYOffsetL -= absorb;
+      hipYOffsetR -= absorb;
     }
     this.hipL = vAdd(b.pelvis.world.p, V(-hipHalf, hipYOffsetL));
     this.hipR = vAdd(b.pelvis.world.p, V(+hipHalf, hipYOffsetR));
@@ -704,12 +789,41 @@
 
     // ---- Legs IK
     const bend = this.facing >= 0 ? 1 : -1;
-    const airRigidity = 0.20;
-    let kneeMinStance = 0.06;
-    let kneeMinSwing = (this.state==='run'?0.10:0.06);
-    const kneeMax=2.4;
-    if(this.state==='land') kneeMinStance = 0.18;
-    if(this.state==='fall'){ kneeMinSwing = 0.32; kneeMinStance = 0.24; }
+    let airRigidity = lerp(0.28, 0.14, flex);
+    let kneeMinStance = lerp(0.045, 0.22, flex);
+    let kneeMinSwing = lerp(0.08, 0.32, flex);
+    let kneeMax = lerp(2.0, 2.55, flex);
+
+    const settleLanding = this.state==='land' ? (1 - clamp(this.land.t/0.32,0,1)) : 0;
+    const crouchTarget = lerp(0.26, 0.46, flex);
+    const landTarget = lerp(0.24, 0.5, flex);
+    const fallTarget = lerp(0.22, 0.45, flex);
+
+    if(this.state==='walk'){
+      kneeMinSwing *= 0.68;
+      kneeMinStance = Math.max(kneeMinStance, lerp(0.05,0.14,flex));
+    }
+    if(this.state==='run'){
+      kneeMinSwing *= 0.85;
+      kneeMinStance = Math.max(kneeMinStance, lerp(0.06,0.18,flex));
+    }
+    if(this.state==='crouch'){
+      kneeMinStance = Math.max(kneeMinStance, crouchTarget);
+      kneeMinSwing = Math.max(kneeMinSwing, crouchTarget*0.85);
+      airRigidity *= 0.75;
+    }
+    if(this.state==='land'){
+      kneeMinStance = Math.max(kneeMinStance, landTarget + settleLanding*0.12);
+      kneeMinSwing = Math.max(kneeMinSwing, landTarget*0.8);
+      airRigidity *= 0.6;
+    }
+    if(this.state==='fall'){
+      kneeMinSwing = Math.max(kneeMinSwing, fallTarget);
+      kneeMinStance = Math.max(kneeMinStance, fallTarget*0.85);
+    }
+    if(!this.grounded){
+      kneeMinSwing = Math.max(kneeMinSwing, lerp(0.14,0.32,flex));
+    }
 
     let landShakeL=0, landShakeR=0;
     if(this.state==='land'){
@@ -720,8 +834,14 @@
     }
 
     const Lres=solve2Bone(this.hipL, this.footL.pos, dim.thigh, dim.shin, bend);
-    const LkBias = (this.state==='jump' || this.state==='fall') ? airRigidity : (this.footL.state==='stance'?kneeMinStance:kneeMinSwing);
+    let LkBias = (this.state==='jump' || this.state==='fall') ? airRigidity : (this.footL.state==='stance'?kneeMinStance:kneeMinSwing);
+    LkBias = Math.min(LkBias, kneeMax);
     let Lk = clamp(Lres.knee, LkBias, kneeMax);
+    const blendStance = 0.45 + flex*0.35;
+    const blendSwing = 0.35 + flex*0.30;
+    const blendL = this.footL.state==='stance' ? blendStance : blendSwing;
+    const LkTarget = clamp(Math.max(Lres.knee, LkBias), LkBias, kneeMax);
+    Lk = clamp(lerp(Lres.knee, LkTarget, blendL), LkBias, kneeMax);
     Lk += landShakeL;
     Lk = clamp(Lk, LkBias, kneeMax);
     b.lThigh.world.p=this.hipL; b.lThigh.world.a=Lres.hip;
@@ -729,8 +849,12 @@
     b.lFoot.world.p=b.lShin.end(); b.lFoot.world.a=this.footL.ang;
 
     const Rres=solve2Bone(this.hipR, this.footR.pos, dim.thigh, dim.shin, bend);
-    const RkBias = (this.state==='jump' || this.state==='fall') ? airRigidity : (this.footR.state==='stance'?kneeMinStance:kneeMinSwing);
+    let RkBias = (this.state==='jump' || this.state==='fall') ? airRigidity : (this.footR.state==='stance'?kneeMinStance:kneeMinSwing);
+    RkBias = Math.min(RkBias, kneeMax);
     let Rk = clamp(Rres.knee, RkBias, kneeMax);
+    const blendR = this.footR.state==='stance' ? blendStance : blendSwing;
+    const RkTarget = clamp(Math.max(Rres.knee, RkBias), RkBias, kneeMax);
+    Rk = clamp(lerp(Rres.knee, RkTarget, blendR), RkBias, kneeMax);
     Rk += landShakeR;
     Rk = clamp(Rk, RkBias, kneeMax);
     b.rThigh.world.p=this.hipR; b.rThigh.world.a=Rres.hip;
@@ -907,7 +1031,8 @@
     ctx.fillText(`Stanje: ${character.state}${character.land.active?' (land)':''}`, 0, 0);
     ctx.fillText(`Hitrost X: ${character.vel.x.toFixed(1)} px/s`, 0, 16);
     ctx.fillText(`Na tleh: ${character.grounded ? 'DA' : 'NE'} | v_y: ${character.vel.y.toFixed(1)} px/s`, 0, 32);
-    ctx.fillText(`Platforme: ${platformsEnabled ? 'vključene' : 'izklopljene'}`, 0, 48);
+    ctx.fillText(`Kolena flex: ${Math.round(kneeFlex*100)}%`, 0, 48);
+    ctx.fillText(`Platforme: ${platformsEnabled ? 'vključene' : 'izklopljene'}`, 0, 64);
     ctx.restore();
 
     requestAnimationFrame(frame);
