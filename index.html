@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<html lang="sl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>2D Skeletal Character – manual rig</title>
+  <style>
+    :root{ --bg:#0b0f15; --fg:#cfe7ff; --accent:#7dd3fc; --accent2:#a78bfa; }
+    html,body{height:100%}
+    body{margin:0;background:radial-gradient(1200px 600px at 70% 10%, #0e1622 0%, #0b0f15 60%, #080b10 100%); color:var(--fg); font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; overflow:hidden}
+    .kbd{display:inline-flex; align-items:center; justify-content:center; min-width:22px; padding:2px 6px; border-radius:6px; border:1px solid rgba(255,255,255,.12); background:rgba(255,255,255,.06); font-weight:600}
+    #hint{position:fixed; top:12px; right:12px; padding:8px 12px; border-radius:12px; border:1px solid rgba(255,255,255,.08); background:rgba(20,27,38,.58)}
+    #tests{position:fixed; top:12px; left:12px; padding:6px 10px; border-radius:10px; border:1px solid rgba(255,255,255,.08); background:rgba(20,27,38,.58); font-size:12px}
+    #err{position:fixed; left:50%; transform:translateX(-50%); bottom:12px; max-width:80vw; padding:8px 12px; border-radius:10px; border:1px solid rgba(255,80,80,.35); background:rgba(255,80,80,.1); color:#fecaca; font-size:12px; display:none}
+    canvas{display:block; width:100vw; height:100vh}
+    #kneeDebug{position:fixed; bottom:24px; left:24px; padding:10px 12px; border-radius:12px; border:1px solid rgba(125,211,252,.18); background:rgba(15,23,42,.68); color:var(--fg); font-size:12px; display:flex; gap:10px; align-items:center; z-index:50}
+    #kneeDebug label{display:flex; flex-direction:column; gap:6px; font-weight:600}
+    #kneeFlexRange{width:140px}
+  </style>
+</head>
+<body>
+  <canvas id="c" tabindex="0"></canvas>
+
+  <div id="hint">
+    Tipke: <span class="kbd">A</span>/<span class="kbd">D</span> – hoja/tek ·
+    <span class="kbd">Shift</span> – tek · <span class="kbd">W</span>/<span class="kbd">Space</span> – skok ·
+    <span class="kbd">S</span> – počep / hitrejši padec · <span class="kbd">G</span> – mreža · <span class="kbd">B</span>/<span class="kbd">T</span> – kosti/tarče · <span class="kbd">P</span> – platforme · <span class="kbd">R</span> – recenter
+  </div>
+  <div id="tests">Self-tests: <span id="testsStatus">running…</span></div>
+  <div id="err"></div>
+
+<script>
+(() => {
+  // ================= Canvas =================
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  let W = canvas.width = window.innerWidth;
+  let H = canvas.height = window.innerHeight;
+
+  window.addEventListener('resize', () => {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+    rebuildPlatforms();
+    snapToGroundOnResize();
+  });
+
+  // ================= Input =================
+  const keys = new Set();
+  let showBones = true;
+  let showTargets = true;
+  let kneeFlex = 0.55;
+  let platformsEnabled = false;
+  let platforms = [];
+  let platformSeed = 0;
+
+  const baseGroundY = () => H - 140;
+  const rebuildPlatforms = () => {
+    platforms = [];
+    if(!platformsEnabled) return;
+    const base = baseGroundY();
+    const span = Math.min(220, H*0.4);
+    const levels = 5;
+    const width = Math.max(160, W*0.22);
+    const stepY = span / levels;
+    const offsetX = ((platformSeed % 2)===0 ? 0.18 : 0.12) * W;
+    for(let i=1; i<=levels; i++){
+      const y = base - i*stepY;
+      const x = offsetX + ((i%2===0)? 0.34 : 0.12)*W;
+      platforms.push({x: clamp(x, 40, W-width-40), y, w: width, h: 12});
+    }
+  };
+  const groundAt = (x= W*0.5, fromY=-Infinity) => {
+    let best = null;
+    const consider = (y) => {
+      if(y >= fromY && (best===null || y < best)){
+        best = y;
+      }
+    };
+    consider(baseGroundY());
+    if(platformsEnabled){
+      for(const p of platforms){
+        if(x >= p.x && x <= p.x+p.w){
+          consider(p.y);
+        }
+      }
+    }
+    return best===null ? baseGroundY() : best;
+  };
+
+  const WANT_CODES = ['KeyW','Space','KeyA','KeyS','KeyD','ShiftLeft','ShiftRight','ArrowLeft','ArrowRight','ArrowDown','ArrowUp','KeyG','KeyR','KeyB','KeyT','KeyP'];
+  window.addEventListener('keydown', e => {
+    const c=e.code;
+    if(WANT_CODES.includes(c)) e.preventDefault();
+    if(c==='KeyB') showBones=!showBones;
+    else if(c==='KeyT') showTargets=!showTargets;
+    else if(c==='KeyP'){
+      platformsEnabled = !platformsEnabled;
+      platformSeed++;
+      rebuildPlatforms();
+      if(character) character.snapToGround(true);
+    }
+    else keys.add(c);
+  }, {passive:false});
+  window.addEventListener('keyup',   e => keys.delete(e.code), {passive:false});
+
+  const kneeDebug = document.createElement('div');
+  kneeDebug.id = 'kneeDebug';
+  const kneeLabel = document.createElement('label');
+  kneeLabel.textContent = 'Kolena · prožnost';
+  const kneeSlider = document.createElement('input');
+  kneeSlider.type='range';
+  kneeSlider.min='0';
+  kneeSlider.max='1';
+  kneeSlider.step='0.01';
+  kneeSlider.value=String(kneeFlex);
+  kneeSlider.id='kneeFlexRange';
+  const kneeVal = document.createElement('span');
+  const updateKneeUI=()=>{
+    kneeVal.textContent = `${Math.round(kneeFlex*100)}%`;
+  };
+  updateKneeUI();
+  kneeSlider.addEventListener('input', ()=>{
+    kneeFlex = parseFloat(kneeSlider.value);
+    updateKneeUI();
+  });
+  kneeLabel.appendChild(kneeSlider);
+  kneeLabel.appendChild(kneeVal);
+  kneeDebug.appendChild(kneeLabel);
+  document.body.appendChild(kneeDebug);
+  // ================= Utils =================
+  const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+  const lerp=(a,b,t)=>a+(b-a)*t;
+  const smoothstep=(t)=>t*t*(3-2*t);
+  const easeInOut=t=>t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
+  const easeOutSine=t=>Math.sin((t*Math.PI)/2);
+  const easeInSine=t=>1-Math.cos((t*Math.PI)/2);
+  const TAU=Math.PI*2;
+  const V=(x=0,y=0)=>({x,y});
+  const vAdd=(a,b)=>V(a.x+b.x,a.y+b.y);
+  const vSub=(a,b)=>V(a.x-b.x,a.y-b.y);
+  const vMul=(a,s)=>V(a.x*s,a.y*s);
+  const vLen=a=>Math.hypot(a.x,a.y);
+  const vNrm=a=>{const L=vLen(a)||1; return V(a.x/L,a.y/L)};
+  const angleTo=a=>Math.atan2(a.y,a.x);
+
+  // noise
+  const n1 = (t)=> Math.sin(t*2.7)*Math.sin(t*1.13+0.6);
+  const n2 = (t)=> Math.sin(t*3.4+1.7)*Math.sin(t*0.86+2.2);
+
+  // ================= Bones =================
+  function Bone(name,length){ this.name=name; this.length=length; this.world={p:V(),a:0}; this.parent=null; }
+  Bone.prototype.setParent=function(p){ this.parent=p; return this; }
+  Bone.prototype.end=function(){ return vAdd(this.world.p, V(Math.cos(this.world.a)*this.length, Math.sin(this.world.a)*this.length)); }
+
+  // ================= Character =================
+  let character;
+
+  function Character(){
+    this.base={
+      pelvisToGround:85,
+      hipSpacing:22,
+      shoulderSpacing:34,
+      shoulderDrop:6,
+      torso:24, chest:18, neck:8, head:18,
+      thigh:42, shin:42, foot:14,
+      upperArm:26, forearm:24, hand:8
+    };
+
+    const initialGround = groundAt(W*0.5);
+    this.pos=V(W*0.5, initialGround - this.base.pelvisToGround);
+    this.vel=V(0,0);
+    this.prevVelY=0;
+    this.grounded=true;
+    this.facing=1;
+    this.t=0;
+
+    const b=this.bones={};
+    b.pelvis=new Bone('pelvis',0);
+    b.spine =new Bone('spine', this.base.torso).setParent(b.pelvis);
+    b.chest =new Bone('chest', this.base.chest).setParent(b.spine);
+    b.neck  =new Bone('neck',  this.base.neck ).setParent(b.chest);
+    b.head  =new Bone('head',  this.base.head ).setParent(b.neck);
+
+    b.lThigh=new Bone('lThigh',this.base.thigh).setParent(b.pelvis);
+    b.lShin =new Bone('lShin', this.base.shin ).setParent(b.lThigh);
+    b.lFoot =new Bone('lFoot', this.base.foot ).setParent(b.lShin);
+    b.rThigh=new Bone('rThigh',this.base.thigh).setParent(b.pelvis);
+    b.rShin =new Bone('rShin', this.base.shin ).setParent(b.rThigh);
+    b.rFoot =new Bone('rFoot', this.base.foot ).setParent(b.rShin);
+
+    b.lArm  =new Bone('lArm',  this.base.upperArm).setParent(b.chest);
+    b.lFore =new Bone('lFore', this.base.forearm).setParent(b.lArm);
+    b.lHand =new Bone('lHand', this.base.hand   ).setParent(b.lFore);
+    b.rArm  =new Bone('rArm',  this.base.upperArm).setParent(b.chest);
+    b.rFore =new Bone('rFore', this.base.forearm).setParent(b.rArm);
+    b.rHand =new Bone('rHand', this.base.hand   ).setParent(b.rFore);
+
+    const gy=initialGround; const off=18;
+    this.neutralFootOffset=off;
+    this.footL={ pos:V(this.pos.x-off, gy), state:'stance', progress:0, anchor:V(this.pos.x-off, gy), ang:0 };
+    this.footR={ pos:V(this.pos.x+off, gy), state:'stance', progress:0, anchor:V(this.pos.x+off, gy), ang:0 };
+
+    this.hipL = V(); this.hipR = V();
+    this.shoulderL = V(); this.shoulderR = V();
+
+    this.gaitLeft=0; this.stanceRatio=0.62; this.gaitCadence=1.8;
+    this.prevLeftInStance=true; this.prevRightInStance=true;
+    this.prevStepDir=this.facing;
+
+    this.takeoffTimer=0.0; this.jumpApex=false;
+    this.land = { active:false, t:0, lead:null, impactVy:0, dipAmp:lerp(0.10,0.24,kneeFlex), weightShift:0, delayCatch:0.08 };
+    this.fallTimer=0;
+    this.groundTimer=0;
+    this.airTimer=0;
+
+    this.gaitClock=0;
+    this.state='idle';
+    this.stateTimer=0;
+    this.wasRunningJump=false;
+  }
+
+  Character.prototype.dim=function(){ return {...this.base}; };
+
+  Character.prototype.updateState=function(dt){
+    if(this.state==='jumpAnticipation' || this.state==='land') return;
+
+    const prev=this.state;
+
+    if(!this.grounded){
+      const descending = this.vel.y > 140 || (this.jumpApex && this.vel.y > 20);
+      this.state = descending ? 'fall' : 'jump';
+    } else {
+      const crouching = (keys.has('KeyS') || keys.has('ArrowDown'));
+      if(crouching){ this.state='crouch'; this.fallTimer=0; return; }
+
+      const speed=Math.abs(this.vel.x);
+      if(speed>220) this.state='run';
+      else if(speed>18) this.state='walk';
+      else this.state='idle';
+      this.fallTimer=0;
+    }
+
+    if(this.state==='fall'){ this.jumpApex=true; }
+    if(this.state!==prev){
+      if(this.state==='fall'){ this.fallTimer=0; }
+      if(prev==='fall'){ this.fallTimer=0; }
+    }
+  };
+
+    Character.prototype.control=function(dt){
+      const accelWalk=2200, accelRun=3800, maxWalk=180, maxRun=420, friction=8;
+      const left  = keys.has('KeyA') || keys.has('ArrowLeft');
+      const right = keys.has('KeyD') || keys.has('ArrowRight');
+      const wantsRun = keys.has('ShiftLeft') || keys.has('ShiftRight');
+      const crouching = (keys.has('KeyS') || keys.has('ArrowDown')) && this.grounded;
+      const wantsJump = keys.has('KeyW') || keys.has('Space') || keys.has('ArrowUp');
+
+      if(left && !right) this.facing=-1;
+      else if(right && !left) this.facing=1;
+      const horiz=(left?-1:0)+(right?1:0);
+
+      const maxSpd=crouching? maxWalk*0.35 : (wantsRun? maxRun : maxWalk);
+      const accel =crouching? accelWalk*0.25 : (wantsRun? accelRun : accelWalk);
+
+      const desired=horiz*maxSpd;
+      const delta=desired-this.vel.x;
+      const airScale=this.grounded?1:0.42;
+      this.vel.x += clamp(delta*10, -accel, accel)*dt*airScale;
+
+      if(horiz===0 && this.grounded){
+        this.vel.x*=Math.exp(-friction*dt);
+        if(Math.abs(this.vel.x)<1) this.vel.x=0;
+      }
+
+      if(!this.grounded){
+        const sideDamp = Math.exp(-(wantsRun?1.6:2.6)*dt);
+        if(horiz===0) this.vel.x*=sideDamp;
+        if(keys.has('KeyS') || keys.has('ArrowDown')) this.vel.y += 900*dt;
+      }
+
+      if(wantsJump && this.grounded && this.state!=='jumpAnticipation' && !crouching){
+        const running=Math.abs(this.vel.x)>maxWalk*0.8;
+        this.state='jumpAnticipation';
+        this.stateTimer= running? 0.10 : 0.16;
+        this.wasRunningJump=running;
+      }
+
+      if(keys.has('KeyR')){
+        this.pos.x = W*0.5;
+        const dim = this.dim();
+        const gy = groundAt(this.pos.x, this.pos.y + dim.pelvisToGround + 1);
+        this.pos.y = gy - dim.pelvisToGround;
+        this.vel.x = 0; this.vel.y = 0;
+        const off=this.neutralFootOffset;
+        this.footL.anchor=V(this.pos.x-off, gy);
+        this.footR.anchor=V(this.pos.x+off, gy);
+        this.footL.pos={...this.footL.anchor}; this.footR.pos={...this.footR.anchor};
+        this.grounded=true;
+        this.state='idle';
+        this.land.active=false;
+        this.fallTimer=0;
+        this.groundTimer=0;
+      }
+    };
+
+  // 2-bone IK
+  function solve2Bone(root, target, L1, L2, bendDir=1){
+    const to=vSub(target,root); const dist=clamp(vLen(to), 0.0001, L1+L2-0.0001);
+    const a=Math.acos(clamp((L1*L1+dist*dist-L2*L2)/(2*L1*dist), -1, 1));
+    const base=angleTo(to);
+    const hip=base + bendDir*a;
+    const knee=Math.PI - Math.acos(clamp((L1*L1+L2*L2-dist*dist)/(2*L1*L2), -1, 1));
+    return {hip,knee};
+  }
+
+  const roll = {
+    heelToFlat: s => lerp(-0.17, 0.0, easeOutSine(s)),
+    flatToToe:  s => lerp(0.0, 0.35, easeInSine(s)),
+    swingClear: s => -0.22*Math.sin(Math.PI*Math.min(1,s))
+  };
+
+  Character.prototype.stepFeet=function(dt){
+    const dim=this.dim(); 
+    const footRef = this.pos.y + dim.pelvisToGround + 1;
+    const groundBody = groundAt(this.pos.x, footRef);
+    const movingX = Math.abs(this.vel.x)>12 ? Math.sign(this.vel.x) : 0;
+    const dir = movingX!==0 ? movingX : this.facing;
+    const groundFor = (foot) => groundAt(foot.anchor?.x ?? foot.pos.x, footRef);
+    const baseAngle = (this.facing>=0)?0:Math.PI;
+    const settle = clamp(this.groundTimer/0.25, 0, 1);
+    const dirChanged = dir !== this.prevStepDir;
+
+    if(this.state==='crouch' || this.state==='jumpAnticipation'){
+      const off=this.neutralFootOffset;
+      for(const f of [this.footL,this.footR]){ f.state='stance'; f.progress=0; f.target=null; f.ang += (baseAngle-f.ang)*Math.min(1,dt*12); }
+        this.footL.anchor.x=this.pos.x-off; this.footR.anchor.x=this.pos.x+off;
+        const supportL = groundFor(this.footL);
+        const supportR = groundFor(this.footR);
+        this.footL.anchor.y = supportL;
+        this.footR.anchor.y = supportR;
+        this.footL.pos=V(this.footL.anchor.x,supportL); this.footR.pos=V(this.footR.anchor.x,supportR);
+        this.prevStepDir = dir;
+      return;
+    }
+
+    if(!this.grounded && (this.state==='jump' || this.state==='fall')){
+      const descending = (this.state==='fall') || (this.jumpApex && this.vel.y>0);
+      const off = this.neutralFootOffset * (descending ? 1.02 : 0.92);
+      const leadBoost = this.wasRunningJump ? (descending ? 18 : 10) : (descending ? 8 : 3);
+
+      const t = this.t;
+      const jx = (descending?3:6) * n1(t*1.2);
+      const jy = (descending?1.5:3.5) * n2(t*1.1);
+
+      const pelvisToFoot = dim.pelvisToGround;
+      const targetBaseY = this.pos.y + pelvisToFoot + (descending ? 6 : 4);
+      const yClamp = descending ? (groundBody - 2) : (groundBody - 18);
+      const yBase = Math.min(yClamp, targetBaseY);
+
+      const landingFront = descending ? leadBoost : 0;
+      const landingBack  = descending ? leadBoost*0.35 : 0;
+      const frontAdjust = (this.facing>=0 ? landingFront : -landingFront);
+      const backAdjust  = (this.facing>=0 ? -landingBack : landingBack);
+      const adjustL = (this.facing>=0 ? backAdjust : frontAdjust);
+      const adjustR = (this.facing>=0 ? frontAdjust : backAdjust);
+
+      const targetL = V(
+        this.pos.x - off + adjustL + jx*0.35,
+        descending ? groundBody - 1 : yBase + jy
+      );
+      const targetR = V(
+        this.pos.x + off + adjustR - jx*0.35,
+        descending ? groundBody - 1 : yBase - jy
+      );
+
+      const k = Math.min(1, dt*(descending?18:12));
+      this.footL.pos.x += (targetL.x - this.footL.pos.x)*k;
+      this.footL.pos.y += (targetL.y - this.footL.pos.y)*k;
+      this.footR.pos.x += (targetR.x - this.footR.pos.x)*k;
+      this.footR.pos.y += (targetR.y - this.footR.pos.y)*k;
+
+      const rollPrep = descending ? clamp((this.vel.y+160)/420,0,1) : 0;
+      const prepAng = roll.flatToToe(rollPrep);
+        this.footL.ang += (baseAngle + prepAng - this.footL.ang)*Math.min(1,dt*12);
+        this.footR.ang += (baseAngle + prepAng - this.footR.ang)*Math.min(1,dt*12);
+
+        this.footL.state='swing'; this.footR.state='swing';
+        this.prevStepDir = dir;
+      return;
+    }
+
+    if(this.state==='land' && this.grounded){
+      this.land.t += dt;
+      const t = this.land.t;
+      const lead = this.land.lead==='L' ? this.footL : this.footR;
+      const trail= this.land.lead==='L' ? this.footR : this.footL;
+      const leadGround = groundFor(lead);
+      const trailGround = groundFor(trail);
+
+      const hsDur=0.12, toeDur=0.09;
+      const hs = clamp(t/hsDur,0,1);
+      lead.ang = baseAngle + roll.heelToFlat(hs);
+      lead.state='stance'; lead.pos=V(lead.anchor.x, leadGround);
+
+      if(t > this.land.delayCatch){
+        if(trail.state!=='stance' && trail.target){
+          trail.progress = Math.min(1, trail.progress + dt/0.14);
+          const k= easeInOut(trail.progress);
+          const lift=14;
+          trail.pos.x = lerp(trail.anchor.x, trail.target.x, k);
+          const glideGround = groundAt(trail.target.x, footRef);
+          trail.pos.y = glideGround - Math.sin(Math.PI*k)*lift;
+          if(trail.progress>=1){
+            trail.state='stance'; trail.anchor.x=trail.target.x; trail.pos=V(trail.target.x,glideGround); trail.target=null;
+          }
+        }
+      }
+
+      if(t>hsDur){
+        const s = clamp((t-hsDur)/toeDur,0,1);
+        lead.ang = baseAngle + roll.flatToToe(s);
+      }
+
+      if(t>hsDur+toeDur+0.10){
+        lead.ang += (baseAngle - lead.ang)*Math.min(1,dt*8);
+        trail.ang += (baseAngle - trail.ang)*Math.min(1,dt*8);
+      }
+
+        if(Math.abs(this.vel.x)<8){
+          this.footL.anchor.x = lerp(this.footL.anchor.x, this.pos.x-this.neutralFootOffset, Math.min(1,dt*4));
+          this.footR.anchor.x = lerp(this.footR.anchor.x, this.pos.x+this.neutralFootOffset, Math.min(1,dt*4));
+          const supportL = groundAt(this.footL.anchor.x, footRef);
+          const supportR = groundAt(this.footR.anchor.x, footRef);
+          this.footL.anchor.y = supportL;
+          this.footR.anchor.y = supportR;
+          this.footL.pos=V(this.footL.anchor.x, supportL);
+          this.footR.pos=V(this.footR.anchor.x, supportR);
+        }
+        this.prevStepDir = dir;
+      return;
+    }
+
+    if(this.grounded && (this.state==='walk' || this.state==='run')){
+      const speed=Math.abs(this.vel.x);
+      this.stanceRatio = (this.state==='run') ? 0.36 : 0.62;
+      const baseCad = (this.state==='run') ? 2.6 : 1.5;
+      const cadLow = (this.state==='run') ? 2.6 : 1.4;
+      const cadHigh = (this.state==='run') ? 3.8 : 2.5;
+      const cad = clamp(baseCad + 0.0045*speed, cadLow, cadHigh);
+      this.gaitCadence = cad;
+
+      this.gaitLeft = (this.gaitLeft + this.gaitCadence*dt) % 1;
+      const leftPhase=this.gaitLeft, rightPhase=(this.gaitLeft+0.5)%1;
+      const leftInStance  = leftPhase  < this.stanceRatio;
+      const rightInStance = rightPhase < this.stanceRatio;
+      const swingDur = Math.max(0.06, (1-this.stanceRatio)/this.gaitCadence);
+
+      const strideN = clamp(speed/(this.state==='run'?420:220), 0, 1);
+      const frontRaw = this.state==='run' ? lerp(18, 38, strideN) : lerp(12, 22, strideN);
+      const trailingRaw = this.state==='run' ? lerp(8, 18, strideN) : lerp(6, 12, strideN);
+      const liftRaw = this.state==='run' ? lerp(6, 20, strideN) : lerp(3, 10, strideN);
+      const front = lerp(this.state==='run'?10:6, frontRaw, settle);
+      const trailing = lerp(this.state==='run'?6:4, trailingRaw, settle);
+      const lift = lerp(this.state==='run'?4:2.5, liftRaw, settle);
+
+      const minX=this.pos.x-(dim.thigh+dim.shin-10);
+      const maxX=this.pos.x+(dim.thigh+dim.shin-10);
+
+      if(dirChanged && this.grounded){
+        const lead = dir>=0 ? this.footR : this.footL;
+        const trail = dir>=0 ? this.footL : this.footR;
+        const leadFront = clamp(this.pos.x + dir*(front*0.9 + this.neutralFootOffset*0.6), minX, maxX);
+        const leadGround = groundAt(leadFront, footRef);
+        lead.state='swing';
+        lead.progress=0;
+        lead.target={x:leadFront, y:leadGround};
+
+        const trailAnchorX = clamp(this.pos.x - dir*trailing, minX, maxX);
+        const trailGround = groundAt(trailAnchorX, footRef);
+        trail.state='stance';
+        trail.progress=0;
+        trail.target=null;
+        trail.anchor.x = trailAnchorX;
+        trail.anchor.y = trailGround;
+        trail.pos.x = trailAnchorX;
+        trail.pos.y = trailGround;
+
+        this.prevLeftInStance = true;
+        this.prevRightInStance = true;
+        this.gaitLeft = dir>=0 ? (this.stanceRatio*0.35) : (this.stanceRatio + 0.35)%1;
+      }
+
+      if(this.prevLeftInStance && !leftInStance && this.footL.state==='stance'){
+        let tx=this.pos.x + dir*front; tx=clamp(tx,minX,maxX);
+        const ty = groundAt(tx, footRef);
+        this.footL.state='swing'; this.footL.progress=0; this.footL.target={x:tx,y:ty};
+        if(this.state==='walk'){ this.footR.state='stance'; this.footR.pos.y=groundAt(this.footR.anchor.x, footRef); }
+      }
+      if(this.prevRightInStance && !rightInStance && this.footR.state==='stance'){
+        let tx=this.pos.x + dir*front; tx=clamp(tx,minX,maxX);
+        const ty = groundAt(tx, footRef);
+        this.footR.state='swing'; this.footR.progress=0; this.footR.target={x:tx,y:ty};
+        if(this.state==='walk'){ this.footL.state='stance'; this.footL.pos.y=groundAt(this.footL.anchor.x, footRef); }
+      }
+
+      for (const f of [this.footL, this.footR]) {
+        if (f.state==='stance') {
+            const support = groundAt(f.anchor.x, footRef);
+          f.pos.x=f.anchor.x; f.pos.y=support;
+        } else if (f.state==='swing' && f.target) {
+          f.progress = Math.min(1, (f.progress||0) + dt/swingDur);
+          const t=easeInOut(f.progress), tHeight=Math.pow(t,0.9);
+          const liftAmt = lerp(4, lift, tHeight);
+          const targetGround = groundAt(f.target.x, footRef);
+          const anchorGround = groundAt(f.anchor.x, footRef);
+          const support = lerp(anchorGround, targetGround, t);
+          f.pos.x=lerp(f.anchor.x,f.target.x,t);
+          f.pos.y=support - Math.sin(Math.PI*tHeight)*liftAmt;
+          if(f.progress>=1){
+            f.state='stance';
+            f.anchor.x=f.target.x;
+            const landingGround = groundAt(f.target.x, footRef);
+            f.anchor.y=landingGround;
+            f.pos.x=f.target.x; f.pos.y=landingGround;
+            f.target=null;
+          }
+        }
+      }
+
+      if(leftInStance){
+        const desiredAnchor = this.pos.x - dir*trailing;
+        this.footL.anchor.x = lerp(this.footL.anchor.x, clamp(desiredAnchor, minX, maxX), Math.min(1, dt*6));
+      }
+      if(rightInStance){
+        const desiredAnchor = this.pos.x + dir*trailing;
+        this.footR.anchor.x = lerp(this.footR.anchor.x, clamp(desiredAnchor, minX, maxX), Math.min(1, dt*6));
+      }
+
+      if(leftInStance){
+        const s=leftPhase/this.stanceRatio;
+        this.footL.ang += (baseAngle + roll.heelToFlat(Math.min(1,s)) - this.footL.ang)*Math.min(1,dt*12);
+      } else {
+        const swingFrac = clamp((leftPhase - this.stanceRatio)/(1-this.stanceRatio),0,1);
+        const swingAngAmp = (this.state==='run'?0.26:0.16);
+        const targetAng = baseAngle - swingAngAmp*Math.sin(Math.PI*swingFrac);
+        this.footL.ang += (targetAng - this.footL.ang)*Math.min(1,dt*10);
+      }
+      if(rightInStance){
+        const s=rightPhase/this.stanceRatio;
+        this.footR.ang += (baseAngle + roll.heelToFlat(Math.min(1,s)) - this.footR.ang)*Math.min(1,dt*12);
+      } else {
+        const swingFrac = clamp((rightPhase - this.stanceRatio)/(1-this.stanceRatio),0,1);
+        const swingAngAmp = (this.state==='run'?0.26:0.16);
+        const targetAng = baseAngle - swingAngAmp*Math.sin(Math.PI*swingFrac);
+        this.footR.ang += (targetAng - this.footR.ang)*Math.min(1,dt*10);
+      }
+
+        this.prevLeftInStance=leftInStance; this.prevRightInStance=rightInStance;
+        this.prevStepDir = dir;
+        return;
+    }
+
+      if(this.grounded){
+        const off=this.neutralFootOffset;
+        this.footL.anchor.x = lerp(this.footL.anchor.x, this.pos.x-off, Math.min(1, dt*6));
+        this.footR.anchor.x = lerp(this.footR.anchor.x, this.pos.x+off, Math.min(1, dt*6));
+        this.footL.anchor.y = groundAt(this.footL.anchor.x, footRef);
+        this.footR.anchor.y = groundAt(this.footR.anchor.x, footRef);
+        this.footL.pos=V(this.footL.anchor.x, groundAt(this.footL.anchor.x, footRef));
+        this.footR.pos=V(this.footR.anchor.x, groundAt(this.footR.anchor.x, footRef));
+        this.footL.ang += (baseAngle - this.footL.ang)*Math.min(1, dt*8);
+        this.footR.ang += (baseAngle - this.footR.ang)*Math.min(1, dt*8);
+        this.prevStepDir = dir;
+        return;
+      }
+  };
+
+  Character.prototype.snapToGround=function(resetVel=false){
+    const dim = this.dim();
+    const gy = groundAt(this.pos.x, this.pos.y + dim.pelvisToGround + 1);
+    this.pos.y = gy - dim.pelvisToGround;
+    if(resetVel){ this.vel.y = 0; this.vel.x *= 0.6; }
+    this.grounded = true;
+    this.groundTimer = 0;
+    this.airTimer = 0;
+    const footRef = this.pos.y + dim.pelvisToGround + 1;
+    const off = this.neutralFootOffset;
+    this.footL.anchor=V(this.pos.x-off, groundAt(this.pos.x-off, footRef));
+    this.footR.anchor=V(this.pos.x+off, groundAt(this.pos.x+off, footRef));
+    this.footL.pos={...this.footL.anchor};
+    this.footR.pos={...this.footR.anchor};
+    this.footL.state='stance'; this.footR.state='stance';
+    this.footL.target=this.footR.target=null;
+    this.prevLeftInStance=true;
+    this.prevRightInStance=true;
+    this.gaitLeft=0;
+    this.state='idle';
+  };
+
+  Character.prototype.updateRig=function(dt){
+    this.t += dt;
+
+    const dim=this.dim();
+    const b=this.bones; // referenca
+    const flex = clamp(kneeFlex,0,1);
+
+    this.stateTimer=Math.max(0, this.stateTimer - dt);
+
+    if(this.state==='jumpAnticipation' && this.stateTimer<=0){
+      this.state='jump';
+      this.takeoffTimer=0.10;
+      this.jumpApex=false;
+      this.vel.y = this.wasRunningJump ? -1000 : -980;
+      this.grounded=false;
+    }
+
+    if(this.state==='jump'){
+      this.takeoffTimer = Math.max(0, this.takeoffTimer - dt);
+      if(!this.jumpApex && this.vel.y>=-20) this.jumpApex=true;
+    }
+    if(this.state==='fall'){
+      this.fallTimer += dt;
+    } else {
+      this.fallTimer = this.state==='land' ? this.fallTimer : 0;
+    }
+
+    if((this.state==='jump' || this.state==='fall') && this.grounded && !this.land.active){
+      const forward = this.facing>=0;
+      const Llead = forward ? (this.footL.pos.x>this.footR.pos.x) : (this.footL.pos.x<this.footR.pos.x);
+      this.land.lead = Llead ? 'L' : 'R';
+      this.land.active=true; this.land.t=0; this.state='land'; this.stateTimer=0.26;
+      this.land.impactVy = Math.abs(this.prevVelY);
+      const dipBase = lerp(0.10, 0.24, flex);
+      const dipScale = lerp(0.12, 0.30, flex);
+      this.land.dipAmp = clamp(dipBase + (this.land.impactVy-300)/1100 * dipScale, dipBase, dipBase + dipScale);
+
+        const contactRef = this.pos.y + dim.pelvisToGround + 1;
+        const leadFoot = this.land.lead==='L' ? this.footL : this.footR;
+        const trailFoot = this.land.lead==='L' ? this.footR : this.footL;
+
+        const leadAnchorX = leadFoot.pos.x;
+        const leadSupport = groundAt(leadAnchorX, contactRef);
+        leadFoot.anchor.x = leadAnchorX;
+        leadFoot.anchor.y = leadSupport;
+        leadFoot.pos.x = leadAnchorX;
+        leadFoot.pos.y = leadSupport;
+        leadFoot.state='stance';
+        leadFoot.progress=0;
+        leadFoot.target=null;
+
+        const catchX = trailFoot.pos.x;
+        const catchSupport = groundAt(catchX, contactRef);
+        trailFoot.state='swing';
+        trailFoot.progress=0;
+        trailFoot.target={x:catchX, y:catchSupport};
+        const base = (this.facing>=0)?0:Math.PI;
+        this.footL.ang=base; this.footR.ang=base;
+    }
+
+    if(this.state==='land' && this.stateTimer<=0 && this.grounded){
+        const targetState = Math.abs(this.vel.x)>18 ? 'walk':'idle';
+        this.state = targetState;
+        this.land.active=false;
+        const off=this.neutralFootOffset;
+        this.footL.anchor.x = lerp(this.footL.anchor.x, this.pos.x-off, 0.6);
+        this.footR.anchor.x = lerp(this.footR.anchor.x, this.pos.x+off, 0.6);
+        const settleRef = this.pos.y + dim.pelvisToGround + 1;
+        for(const f of [this.footL,this.footR]){
+          f.state='stance'; f.progress=0; f.target=null;
+          const support = groundAt(f.anchor.x, settleRef);
+          f.anchor.y = support;
+          f.pos.y = support;
+          f.pos.x = f.anchor.x;
+        }
+      this.gaitLeft = 0;
+      this.prevLeftInStance = true;
+      this.prevRightInStance = true;
+    }
+
+    // ---- Physics / height pose
+    const footProbe = this.pos.y + dim.pelvisToGround + Math.max(0, this.vel.y*dt) + 1;
+    const ground = groundAt(this.pos.x, footProbe);
+    let poseHeightFactor = 1.0;
+    if(this.state==='crouch'){
+      poseHeightFactor=lerp(0.72, 0.52, flex);
+    } else if(this.state==='jumpAnticipation'){
+      const total=this.wasRunningJump?0.10:0.16; const t=1-(this.stateTimer/total);
+      const crouchAim = lerp(0.84, 0.64, flex);
+      poseHeightFactor=lerp(1.0,crouchAim,easeInOut(t));
+    } else if(this.state==='land'){
+      const t = clamp(this.land.t/0.24,0,1);
+      const dipMult = lerp(1.0, 1.25, flex);
+      poseHeightFactor = 1.0 - Math.sin(t*Math.PI)*this.land.dipAmp*dipMult;
+    } else if(this.state==='fall'){
+      const t = clamp(this.fallTimer/0.35,0,1);
+      poseHeightFactor = 1.0 - easeOutSine(t)*lerp(0.04, 0.10, flex);
+    }
+    const desiredPelvis = dim.pelvisToGround * poseHeightFactor;
+
+    this.prevVelY = this.vel.y;
+    this.vel.y += 1400*dt;
+    this.pos.x += this.vel.x*dt;
+    this.pos.y += this.vel.y*dt;
+
+    const minY = ground - desiredPelvis;
+    if (this.pos.y >= minY) { this.pos.y = minY; if (this.vel.y > 0) this.vel.y = 0; this.grounded = true; }
+    else { this.grounded = false; }
+    if(this.grounded){
+      this.groundTimer = Math.min(this.groundTimer + dt, 2);
+      this.airTimer = 0;
+    } else {
+      this.airTimer = Math.min(this.airTimer + dt, 2);
+      this.groundTimer = 0;
+    }
+
+    // keep in view horizontally
+    this.pos.x = clamp(this.pos.x, 40, W-40);
+
+    if(this.state==='land' && this.land.t<0.12){
+      const damp=24; this.vel.x *= Math.exp(-damp*dt);
+    }
+
+    // ---- Gait clock
+    const speedTerm = Math.abs(this.vel.x)*0.02;
+    const cadence = (this.state==='run'?3 : this.state==='walk'?1.9 : 0.5);
+    this.gaitClock += (speedTerm + cadence*0.16) * dt;
+    const bobScale = lerp(0.6, 1.1, flex);
+    const bob = this.grounded ? Math.sin(this.gaitClock*TAU) * (this.state==='run'?4*bobScale : this.state==='walk'?1.6*bobScale : 0.4*bobScale) : (this.state==='fall'? -2 : 0);
+
+    // ---- Pelvis
+    b.pelvis.world.p = V(this.pos.x, this.pos.y + bob);
+    b.pelvis.world.a = 0;
+
+    // ---- Hip hiking
+    const hipHalf = (dim.hipSpacing)*0.5;
+    let hipYOffsetL=0, hipYOffsetR=0;
+    const isGaiting = this.grounded && (this.state==='walk' || this.state==='run');
+    let leftInStance=true, rightInStance=true;
+    let leftPhase=this.gaitLeft;
+    let rightPhase=(this.gaitLeft+0.5)%1;
+    if(isGaiting){
+      leftInStance  = (leftPhase < this.stanceRatio);
+      rightInStance = (rightPhase < this.stanceRatio);
+      const hike = (this.state==='run'? 5 : 3);
+      if(leftInStance && !rightInStance){ hipYOffsetR = -hike; hipYOffsetL = +hike*0.4; }
+      else if(rightInStance && !leftInStance){ hipYOffsetL = -hike; hipYOffsetR = +hike*0.4; }
+    } else if(!this.grounded){
+      const drop = clamp(this.vel.y/400, -0.5, 0.6);
+      hipYOffsetL = drop * (this.facing>=0?-6:6);
+      hipYOffsetR = drop * (this.facing>=0?6:-6);
+    } else {
+      const floatPhase=this.gaitClock%1;
+      leftPhase = floatPhase;
+      rightPhase = (floatPhase+0.5)%1;
+    }
+    if(this.state==='crouch'){
+      const crouchDrop = lerp(6, 12, flex);
+      hipYOffsetL -= crouchDrop;
+      hipYOffsetR -= crouchDrop;
+    } else if(this.state==='land'){
+      const absorb = this.land.dipAmp * lerp(18, 28, flex);
+      hipYOffsetL -= absorb;
+      hipYOffsetR -= absorb;
+    }
+    this.hipL = vAdd(b.pelvis.world.p, V(-hipHalf, hipYOffsetL));
+    this.hipR = vAdd(b.pelvis.world.p, V(+hipHalf, hipYOffsetR));
+
+    // ---- Spine/Chest/Head
+    const moveDir=(this.vel.x!==0? Math.sign(this.vel.x): this.facing);
+    const torsoLean=(this.state==='run'?0.12: this.state==='walk'?0.03: this.state==='fall'?0.08:0) * moveDir;
+    const torsoTwistAmt=(this.state==='run'?0.10: this.state==='walk'?0.05: this.state==='fall'?0.04:0);
+    const torsoTwist=Math.cos(this.gaitClock*TAU)*torsoTwistAmt*moveDir;
+
+    b.spine.world.p=b.pelvis.world.p; b.spine.world.a = -Math.PI*0.5 + torsoLean;
+    b.chest.world.p=b.spine.end();    b.chest.world.a = b.spine.world.a + torsoTwist;
+    b.neck.world.p =b.chest.end();    b.neck.world.a  = b.chest.world.a;
+    b.head.world.p =b.neck.end();     b.head.world.a  = b.neck.world.a + (-torsoLean - torsoTwist);
+
+    // ---- Shoulders
+    const torsoVec=vSub(b.chest.world.p, b.pelvis.world.p), torsoDir=vNrm(torsoVec);
+    const perp=V(-torsoDir.y, torsoDir.x), shHalf=(dim.shoulderSpacing)*0.5, drop=dim.shoulderDrop;
+    this.shoulderL = vAdd(b.chest.world.p, vAdd(vMul(perp,-shHalf), V(0, drop)));
+    this.shoulderR = vAdd(b.chest.world.p, vAdd(vMul(perp,+shHalf), V(0, drop)));
+    const moveAmount = clamp(Math.abs(this.vel.x)/(this.state==='run'?420:220), 0, 1);
+    const shoulderSwing = (this.state==='run'?6:(this.state==='walk'?3:0.6)) * (0.35 + 0.65*moveAmount);
+    const shoulderBob = (this.state==='run'?2.2:(this.state==='walk'?1.1:0.25)) * (0.25 + 0.75*moveAmount);
+    const lPhase = leftPhase;
+    const rPhase = rightPhase;
+    if(shoulderSwing>0){
+      this.shoulderL = vAdd(this.shoulderL, V(Math.sin(lPhase*TAU)*shoulderSwing, Math.cos(lPhase*TAU)*shoulderBob));
+      this.shoulderR = vAdd(this.shoulderR, V(Math.sin((rPhase*TAU)+Math.PI)*shoulderSwing, Math.cos((rPhase*TAU)+Math.PI)*shoulderBob));
+    }
+
+    // ---- Legs IK
+    const bend = this.facing >= 0 ? 1 : -1;
+    let airRigidity = lerp(0.28, 0.14, flex);
+    let kneeMinStance = lerp(0.045, 0.22, flex);
+    let kneeMinSwing = lerp(0.08, 0.32, flex);
+    let kneeMax = lerp(2.0, 2.55, flex);
+
+    const settleLanding = this.state==='land' ? (1 - clamp(this.land.t/0.32,0,1)) : 0;
+    const crouchTarget = lerp(0.26, 0.46, flex);
+    const landTarget = lerp(0.24, 0.5, flex);
+    const fallTarget = lerp(0.22, 0.45, flex);
+
+    if(this.state==='walk'){
+      kneeMinSwing *= 0.68;
+      kneeMinStance = Math.max(kneeMinStance, lerp(0.05,0.14,flex));
+    }
+    if(this.state==='run'){
+      kneeMinSwing *= 0.85;
+      kneeMinStance = Math.max(kneeMinStance, lerp(0.06,0.18,flex));
+    }
+    if(this.state==='crouch'){
+      kneeMinStance = Math.max(kneeMinStance, crouchTarget);
+      kneeMinSwing = Math.max(kneeMinSwing, crouchTarget*0.85);
+      airRigidity *= 0.75;
+    }
+    if(this.state==='land'){
+      kneeMinStance = Math.max(kneeMinStance, landTarget + settleLanding*0.12);
+      kneeMinSwing = Math.max(kneeMinSwing, landTarget*0.8);
+      airRigidity *= 0.6;
+    }
+    if(this.state==='fall'){
+      kneeMinSwing = Math.max(kneeMinSwing, fallTarget);
+      kneeMinStance = Math.max(kneeMinStance, fallTarget*0.85);
+    }
+    if(!this.grounded){
+      kneeMinSwing = Math.max(kneeMinSwing, lerp(0.14,0.32,flex));
+    }
+
+    let landShakeL=0, landShakeR=0;
+    if(this.state==='land'){
+      const damp = Math.exp(-this.land.t*16);
+      const wobble = Math.sin(this.land.t*70) * 0.18 * damp;
+      if(this.land.lead==='L'){ landShakeL = wobble; landShakeR = wobble*0.6; }
+      else { landShakeR = wobble; landShakeL = wobble*0.6; }
+    }
+
+    const Lres=solve2Bone(this.hipL, this.footL.pos, dim.thigh, dim.shin, bend);
+    let LkBias = (this.state==='jump' || this.state==='fall') ? airRigidity : (this.footL.state==='stance'?kneeMinStance:kneeMinSwing);
+    LkBias = Math.min(LkBias, kneeMax);
+    let Lk = clamp(Lres.knee, LkBias, kneeMax);
+    const blendStance = 0.45 + flex*0.35;
+    const blendSwing = 0.35 + flex*0.30;
+    const blendL = this.footL.state==='stance' ? blendStance : blendSwing;
+    const LkTarget = clamp(Math.max(Lres.knee, LkBias), LkBias, kneeMax);
+    Lk = clamp(lerp(Lres.knee, LkTarget, blendL), LkBias, kneeMax);
+    Lk += landShakeL;
+    Lk = clamp(Lk, LkBias, kneeMax);
+    b.lThigh.world.p=this.hipL; b.lThigh.world.a=Lres.hip;
+    b.lShin.world.p=b.lThigh.end(); b.lShin.world.a=b.lThigh.world.a + (Lk*bend);
+    b.lFoot.world.p=b.lShin.end(); b.lFoot.world.a=this.footL.ang;
+
+    const Rres=solve2Bone(this.hipR, this.footR.pos, dim.thigh, dim.shin, bend);
+    let RkBias = (this.state==='jump' || this.state==='fall') ? airRigidity : (this.footR.state==='stance'?kneeMinStance:kneeMinSwing);
+    RkBias = Math.min(RkBias, kneeMax);
+    let Rk = clamp(Rres.knee, RkBias, kneeMax);
+    const blendR = this.footR.state==='stance' ? blendStance : blendSwing;
+    const RkTarget = clamp(Math.max(Rres.knee, RkBias), RkBias, kneeMax);
+    Rk = clamp(lerp(Rres.knee, RkTarget, blendR), RkBias, kneeMax);
+    Rk += landShakeR;
+    Rk = clamp(Rk, RkBias, kneeMax);
+    b.rThigh.world.p=this.hipR; b.rThigh.world.a=Rres.hip;
+    b.rShin.world.p=b.rThigh.end(); b.rShin.world.a=b.rThigh.world.a + (Rk*bend);
+    b.rFoot.world.p=b.rShin.end(); b.rFoot.world.a=this.footR.ang;
+
+    // ---- Arms
+    const baseDown=Math.PI*0.5;
+    let lUpper, rUpper, lElbow, rElbow, lHandOff, rHandOff;
+
+    if(this.state==='jumpAnticipation'){
+      const total=this.wasRunningJump?0.10:0.16; const t=(total - this.stateTimer)/total;
+      const back=lerp(0, -1.0, easeInOut(t));
+      lUpper=baseDown+back; rUpper=baseDown+back; lElbow=0.25; rElbow=0.25; lHandOff=0.32; rHandOff=0.32;
+    }
+    else if(this.state==='jump'){
+      const ascend = this.vel.y < -40 ? 1 : 0;
+      const horizL  = baseDown - Math.PI/2;
+      const horizR  = baseDown + Math.PI/2;
+      const upL     = baseDown - (Math.PI/2 + 0.35);
+      const upR     = baseDown + (Math.PI/2 + 0.35);
+      const targL = ascend ? horizL : upL;
+      const targR = ascend ? horizR : upR;
+
+      const jb = 0.12 * n2(this.t*2.4);
+      lUpper = targL + jb;
+      rUpper = targR - jb;
+
+      lElbow = ascend ? 0.32 : 0.48;
+      rElbow = lElbow;
+      lHandOff = ascend ? 0.18 : 0.28;
+      rHandOff = lHandOff;
+    }
+    else if(this.state==='fall'){
+      const reach = easeOutSine(clamp(this.fallTimer/0.25,0,1));
+      const targetLA = -Math.PI/2 - 0.3;
+      const targetRA = -Math.PI/2 + 0.3;
+      lUpper = lerp(baseDown, targetLA, reach);
+      rUpper = lerp(baseDown, targetRA, reach);
+      const elbowBend = lerp(0.48, 0.22, reach);
+      lElbow = elbowBend;
+      rElbow = elbowBend;
+      const handCurl = lerp(0.26, -0.12, reach);
+      lHandOff = handCurl;
+      rHandOff = handCurl;
+    }
+    else if(this.state==='land'){
+      lUpper=baseDown-0.32; rUpper=baseDown-0.32; lElbow=0.55; rElbow=0.55; lHandOff=0.22; rHandOff=0.22;
+    }
+    else{
+      const armAmp = (this.state==='run'? 1.05 : this.state==='walk'? 0.58 : 0.16);
+      const handSwing = (this.state==='run'? 0.32 : this.state==='walk'? 0.22 : 0.06);
+      const lS = Math.sin((leftPhase)*TAU), rS = Math.sin((rightPhase)*TAU);
+      const jitter = 0.06 * n1(this.t*3.1);
+      lUpper = baseDown + (-armAmp)*rS + jitter;
+      rUpper = baseDown + (+armAmp)*lS - jitter;
+      const rightBlend = (1+Math.sin((rightPhase)*TAU))/2;
+      const leftBlend  = (1+Math.sin((leftPhase )*TAU))/2;
+      lElbow = lerp(0.64, 0.36, rightBlend);
+      rElbow = lerp(0.64, 0.36, leftBlend);
+      const handBase = 0.35;
+      lHandOff = handBase + handSwing*rightBlend;
+      rHandOff = handBase + handSwing*leftBlend;
+    }
+
+    b.lArm.world.p=this.shoulderL; b.lArm.world.a=lUpper;
+    b.lFore.world.p=b.lArm.end();   b.lFore.world.a=b.lArm.world.a + lElbow;
+    b.lHand.world.p=b.lFore.end();  b.lHand.world.a=b.lFore.world.a + lHandOff;
+
+    b.rArm.world.p=this.shoulderR; b.rArm.world.a=rUpper;
+    b.rFore.world.p=b.rArm.end();   b.rFore.world.a=b.rArm.world.a + rElbow;
+    b.rHand.world.p=b.rFore.end();  b.rHand.world.a=b.rFore.world.a + rHandOff;
+  };
+
+  Character.prototype.draw=function(){
+    const b=this.bones;
+
+    const gy=baseGroundY(); ctx.strokeStyle='rgba(255,255,255,.08)'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(0,gy+0.5); ctx.lineTo(W,gy+0.5); ctx.stroke();
+    if(platformsEnabled){
+      ctx.fillStyle='rgba(59,130,246,0.18)';
+      ctx.strokeStyle='rgba(125,211,252,0.45)';
+      ctx.lineWidth=2;
+      for(const p of platforms){
+        ctx.beginPath();
+        ctx.rect(p.x, p.y, p.w, p.h);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
+    if(keys.has('KeyG')){ ctx.strokeStyle='rgba(255,255,255,.05)'; for(let x=0;x<W;x+=40){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); } for(let y=0;y<H;y+=40){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); } }
+
+    // Skin
+    const head=b.head.world.p, chest=b.chest.world.p, pelvis=b.pelvis.world.p;
+    ctx.fillStyle='rgba(125,211,252,.18)'; ctx.strokeStyle='rgba(125,211,252,.55)'; ctx.lineWidth=2.5;
+
+    const torsoVec=vSub(chest,pelvis); const torsoDir=vNrm(torsoVec); const r=10; const perp=V(-torsoDir.y,torsoDir.x);
+    const A1=vAdd(pelvis, vMul(perp,r)), A2=vSub(pelvis, vMul(perp,r));
+    const B1=vAdd(chest, vMul(perp,r*0.9)), B2=vSub(chest, vMul(perp,r*0.9));
+    ctx.beginPath(); ctx.moveTo(A1.x,A1.y); ctx.lineTo(B1.x,B1.y); ctx.arcTo(chest.x,chest.y,B2.x,B2.y,r*0.9); ctx.lineTo(A2.x,A2.y); ctx.arcTo(pelvis.x,pelvis.y,A1.x,A1.y,r); ctx.closePath(); ctx.fill(); ctx.stroke();
+
+    // Head + eye
+    ctx.beginPath(); ctx.arc(head.x, head.y, 12, 0, TAU); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(head.x + 5*(this.facing), head.y - 2, 2, 0, TAU); ctx.fillStyle='rgba(207,231,255,.95)'; ctx.fill();
+
+    if(showTargets){ for(const f of [this.footL,this.footR]){ ctx.fillStyle='rgba(167,139,250,.5)'; ctx.beginPath(); ctx.arc(f.pos.x,f.pos.y,4,0,TAU); ctx.fill(); ctx.strokeStyle='rgba(167,139,250,.9)'; ctx.beginPath(); ctx.moveTo(f.pos.x-8,f.pos.y); ctx.lineTo(f.pos.x+8,f.pos.y); ctx.stroke(); } }
+
+    if(showBones){
+      ctx.lineCap='round';
+      const J=p=>{ ctx.beginPath(); ctx.arc(p.x,p.y,3,0,TAU); ctx.fillStyle='rgba(207,231,255,.9)'; ctx.fill(); };
+      const bone=(from,to,w=4)=>{ ctx.beginPath(); ctx.moveTo(from.x,from.y); ctx.lineWidth=w; ctx.strokeStyle='rgba(207,231,255,.9)'; ctx.lineTo(to.x,to.y); ctx.stroke(); };
+
+      // Legs
+      bone(this.hipL, b.lThigh.end(), 4); bone(b.lThigh.end(), b.lShin.end(), 3); bone(b.lShin.end(), b.lFoot.end(), 2);
+      bone(this.hipR, b.rThigh.end(), 4); bone(b.rThigh.end(), b.rShin.end(), 3); bone(b.rShin.end(), b.rFoot.end(), 2);
+      bone(pelvis, this.hipL, 2); bone(pelvis, this.hipR, 2);
+
+      // Shoulders + arms
+      bone(b.chest.world.p, this.shoulderL, 2); bone(b.chest.world.p, this.shoulderR, 2);
+      bone(this.shoulderL, b.lArm.end(), 3); bone(b.lArm.end(), b.lFore.end(), 2); bone(b.lFore.end(), b.lHand.end(), 2);
+      bone(this.shoulderR, b.rArm.end(), 3); bone(b.rArm.end(), b.rFore.end(), 2); bone(b.rFore.end(), b.rHand.end(), 2);
+
+      // Spine
+      bone(b.pelvis.world.p, b.spine.end(), 4); bone(b.spine.end(), b.chest.end(), 4); bone(b.chest.end(), b.neck.end(), 3); bone(b.neck.end(), b.head.end(), 3);
+
+      for(const p of [b.pelvis.world.p, this.hipL, this.hipR, this.shoulderL, this.shoulderR, b.lThigh.end(), b.lShin.end(), b.lFoot.end(), b.rThigh.end(), b.rShin.end(), b.rFoot.end(), b.lArm.end(), b.lFore.end(), b.rArm.end(), b.rFore.end(), b.spine.end(), b.chest.end(), b.neck.end(), b.head.end()]) J(p);
+    }
+  };
+
+  // ================= Self tests =================
+  function runTests(){
+    const out=document.getElementById('testsStatus');
+    try{
+      const r=V(0,0), t=V(50,10); const sol=solve2Bone(r,t,40,40,1);
+      if(!isFinite(sol.hip) || !isFinite(sol.knee)) throw new Error('IK NaN');
+
+      const ch=new Character(); ch.updateRig(1/60); if(!isFinite(ch.pos.x) || !isFinite(ch.pos.y)) throw new Error('update produced NaN');
+
+      const ch2=new Character(); ch2.grounded=true; ch2.vel.x=220; ch2.updateState(1/60); ch2.stepFeet(1/60);
+      const okStates=['stance','swing']; if(!okStates.includes(ch2.footL.state) || !okStates.includes(ch2.footR.state)) throw new Error('bad foot state');
+
+      const ch3=new Character(); ch3.state='jump'; ch3.grounded=false; ch3.vel.y=-200; ch3.stepFeet(1/60); ch3.updateRig(1/60);
+      if(!isFinite(ch3.bones.lFoot.world.a) || !isFinite(ch3.bones.rFoot.world.a)) throw new Error('footAngle NaN (air)');
+
+      const ch4=new Character(); ch4.grounded=false; ch4.jumpApex=true; ch4.vel.y=240; ch4.updateState(1/60);
+      if(ch4.state!=='fall') throw new Error('fall transition failed');
+
+      out.textContent='OK (5/5)'; out.style.color='#a7f3d0';
+    }catch(e){ out.textContent='FAIL'; out.style.color='#fecaca'; console.error('Self-tests failed', e); showErr(e.message); }
+  }
+
+  // Fixed timestep
+  let last=performance.now();
+  let acc=0;
+  const FIXED_STEP = 1/120;
+
+  // ================= Main loop =================
+  function frame(t){
+    const dtRaw=(t-last)/1000; last=t; acc += dtRaw;
+
+    while(acc >= FIXED_STEP){
+      const dt = FIXED_STEP;
+      character.control(dt);
+      character.updateState(dt);
+      character.stepFeet(dt);
+      character.updateRig(dt);
+      acc -= FIXED_STEP;
+    }
+
+    ctx.clearRect(0,0,W,H);
+    character.draw();
+
+    ctx.save(); ctx.translate(12,60); ctx.fillStyle='rgba(207,231,255,.9)'; ctx.font='12px ui-sans-serif, system-ui,-apple-system,Segoe UI,Roboto';
+    ctx.fillText(`Stanje: ${character.state}${character.land.active?' (land)':''}`, 0, 0);
+    ctx.fillText(`Hitrost X: ${character.vel.x.toFixed(1)} px/s`, 0, 16);
+    ctx.fillText(`Na tleh: ${character.grounded ? 'DA' : 'NE'} | v_y: ${character.vel.y.toFixed(1)} px/s`, 0, 32);
+    ctx.fillText(`Kolena flex: ${Math.round(kneeFlex*100)}%`, 0, 48);
+    ctx.fillText(`Platforme: ${platformsEnabled ? 'vključene' : 'izklopljene'}`, 0, 64);
+    ctx.restore();
+
+    requestAnimationFrame(frame);
+  }
+
+  function snapToGroundOnResize(){
+    if (!character) return;
+    character.snapToGround(true);
+  }
+
+  function showErr(msg){
+    const el = document.getElementById('err');
+    el.textContent = 'JS napaka: ' + msg;
+    el.style.display = 'block';
+    setTimeout(()=>{ el.style.display = 'none'; }, 4000);
+  }
+  window.addEventListener('error', e=> showErr(e.message));
+
+  // Boot
+  character = new Character();
+  runTests();
+  requestAnimationFrame(frame);
+
+  // ================= UI events =================
+  // ni dodatnih UI dogodkov – vse upravlja tipkovnica
+})();
+</script>
+</body>
+</html>
