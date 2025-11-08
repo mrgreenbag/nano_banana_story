@@ -634,21 +634,25 @@
       const dipScale = lerp(0.12, 0.30, flex);
       this.land.dipAmp = clamp(dipBase + (this.land.impactVy-300)/1100 * dipScale, dipBase, dipBase + dipScale);
 
-        const off=this.neutralFootOffset;
-        const fSign = (this.facing>=0)?1:-1;
-        const small = 10;
         const contactRef = this.pos.y + dim.pelvisToGround + 1;
-        if(this.land.lead==='L'){
-          this.footL.anchor.x = this.pos.x + fSign*(off+small);
-          this.footL.anchor.y = groundAt(this.footL.anchor.x, contactRef);
-          this.footR.state='swing'; this.footR.progress=0; this.footR.target={x: this.pos.x - fSign*(off*0.6), y:groundAt(this.pos.x - fSign*(off*0.6), contactRef)};
-        }else{
-          this.footR.anchor.x = this.pos.x + fSign*(off+small);
-          this.footR.anchor.y = groundAt(this.footR.anchor.x, contactRef);
-          this.footL.state='swing'; this.footL.progress=0; this.footL.target={x: this.pos.x - fSign*(off*0.6), y:groundAt(this.pos.x - fSign*(off*0.6), contactRef)};
-        }
-        this.footL.pos.y=groundAt(this.footL.anchor.x, contactRef);
-        this.footR.pos.y=groundAt(this.footR.anchor.x, contactRef);
+        const leadFoot = this.land.lead==='L' ? this.footL : this.footR;
+        const trailFoot = this.land.lead==='L' ? this.footR : this.footL;
+
+        const leadAnchorX = leadFoot.pos.x;
+        const leadSupport = groundAt(leadAnchorX, contactRef);
+        leadFoot.anchor.x = leadAnchorX;
+        leadFoot.anchor.y = leadSupport;
+        leadFoot.pos.x = leadAnchorX;
+        leadFoot.pos.y = leadSupport;
+        leadFoot.state='stance';
+        leadFoot.progress=0;
+        leadFoot.target=null;
+
+        const catchX = trailFoot.pos.x;
+        const catchSupport = groundAt(catchX, contactRef);
+        trailFoot.state='swing';
+        trailFoot.progress=0;
+        trailFoot.target={x:catchX, y:catchSupport};
         const base = (this.facing>=0)?0:Math.PI;
         this.footL.ang=base; this.footR.ang=base;
     }
